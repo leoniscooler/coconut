@@ -219,6 +219,7 @@ const coconut = {
 const crabs = [];
 const groundCoconuts = [];
 const staticColliders = []; // {x, z, radius} for solid objects
+const platformColliders = []; // {x,y,z, hw,hh,hd} AABB boxes coconut can roll on
 let waterGeo = null;
 
 // ===== PERSISTENCE =====
@@ -1073,6 +1074,495 @@ createPavilion(28, 26);
 createBeachUmbrella(-15, 12);
 staticColliders.push({ x: -15, z: 12, radius: 0.3 });
 
+// ===== PARKOUR COURSE: "The Coconut Gauntlet" =====
+// Near spawn (0,5), running roughly from z=10 down to z=-15
+const courseDriftwoodMat = new THREE.MeshStandardMaterial({ color: 0xB0956E, roughness: 0.88, metalness: 0 });
+const coursePlankMat = new THREE.MeshStandardMaterial({ color: 0xC4A87A, roughness: 0.82, metalness: 0 });
+const courseRockMat = new THREE.MeshStandardMaterial({ map: rockTex, color: 0xA89880, roughness: 0.78, metalness: 0.03 });
+const courseSandMoundMat = new THREE.MeshStandardMaterial({ map: sandTex, color: 0xF0DFC0, roughness: 0.85 });
+const courseBarrelMat = new THREE.MeshStandardMaterial({ color: 0x8B7355, roughness: 0.75 });
+const courseCrateMat = new THREE.MeshStandardMaterial({ color: 0xC4A060, roughness: 0.82 });
+
+// Sign at the start
+(function createCourseSign() {
+  const group = new THREE.Group();
+  const postMat = new THREE.MeshStandardMaterial({ color: 0x8A7050, roughness: 0.9 });
+  [-0.7, 0.7].forEach(ox => {
+    const post = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.06, 1.6, 5), postMat);
+    post.position.set(ox, 0.8, 0);
+    post.castShadow = true;
+    group.add(post);
+  });
+  const board = new THREE.Mesh(
+    new THREE.BoxGeometry(1.6, 0.4, 0.06),
+    new THREE.MeshStandardMaterial({ color: 0xC8AD7C, roughness: 0.85 })
+  );
+  board.position.set(0, 1.35, 0);
+  board.castShadow = true;
+  group.add(board);
+  const tc = document.createElement('canvas'); tc.width = 256; tc.height = 64;
+  const tctx = tc.getContext('2d');
+  tctx.fillStyle = '#C8AD7C'; tctx.fillRect(0, 0, 256, 64);
+  tctx.fillStyle = '#3A2510'; tctx.font = 'bold 18px Georgia'; tctx.textAlign = 'center';
+  tctx.fillText('THE COCONUT GAUNTLET', 128, 28);
+  tctx.font = 'italic 11px Georgia'; tctx.fillStyle = '#6A5030';
+  tctx.fillText('Official Parkour Training Facility', 128, 48);
+  const signTex = new THREE.CanvasTexture(tc);
+  const signFace = new THREE.Mesh(
+    new THREE.PlaneGeometry(1.5, 0.38),
+    new THREE.MeshStandardMaterial({ map: signTex, roughness: 0.8 })
+  );
+  signFace.position.set(0, 1.35, 0.035);
+  group.add(signFace);
+  group.position.set(4, 0, 10);
+  group.rotation.y = -0.3;
+  scene.add(group);
+})();
+
+// === SECTION 1: Driftwood Log Run ===
+(function createDriftwoodRun() {
+  const logPositions = [
+    { x: 5, z: 8, len: 1.4, r: 0.15, rotY: 0.15, rotZ: 0.05, tilt: 0.08 },
+    { x: 6.2, z: 6.5, len: 1.2, r: 0.13, rotY: -0.1, rotZ: 0.1, tilt: -0.05 },
+    { x: 5.5, z: 5, len: 1.6, r: 0.16, rotY: 0.25, rotZ: -0.04, tilt: 0.1 },
+    { x: 6.8, z: 3.5, len: 1.3, r: 0.14, rotY: -0.2, rotZ: 0.08, tilt: -0.06 },
+    { x: 5.8, z: 2, len: 1.5, r: 0.15, rotY: 0.05, rotZ: -0.06, tilt: 0.04 },
+    { x: 7, z: 0.5, len: 1.1, r: 0.12, rotY: 0.3, rotZ: 0.03, tilt: 0.12 },
+    { x: 5.5, z: -1, len: 1.4, r: 0.14, rotY: -0.15, rotZ: 0.06, tilt: -0.03 },
+  ];
+  logPositions.forEach(lp => {
+    const gy = getGroundHeight(lp.x, lp.z);
+    const logGeo = new THREE.CylinderGeometry(lp.r - 0.01, lp.r + 0.02, lp.len, 7);
+    const mat = courseDriftwoodMat.clone();
+    mat.color.set(new THREE.Color(0xB0956E).lerp(new THREE.Color(0xC8B090), Math.random()*0.3));
+    const log = new THREE.Mesh(logGeo, mat);
+    log.position.set(lp.x, gy + lp.r * 0.6, lp.z);
+    log.rotation.set(lp.tilt, lp.rotY, Math.PI/2 + lp.rotZ);
+    log.castShadow = true;
+    log.receiveShadow = true;
+    scene.add(log);
+    platformColliders.push({
+      x: lp.x, y: gy + lp.r * 0.6, z: lp.z,
+      hw: lp.len * 0.45, hh: lp.r * 0.5, hd: lp.r * 0.8
+    });
+  });
+})();
+
+// Decorative coconuts along the course
+createGroundCoconut(4, 9);
+createGroundCoconut(7.5, 4);
+createGroundCoconut(4.5, -0.5);
+
+// === SECTION 2: Stepping Stones in Shallow Water ===
+(function createSteppingStones() {
+  const stones = [
+    { x: 6.5, z: -2.5, r: 0.7, h: 0.35, flat: 0.4 },
+    { x: 7.8, z: -4, r: 0.6, h: 0.3, flat: 0.45 },
+    { x: 6.8, z: -5.5, r: 0.75, h: 0.32, flat: 0.38 },
+    { x: 8.2, z: -7, r: 0.55, h: 0.28, flat: 0.5 },
+    { x: 7, z: -8.5, r: 0.65, h: 0.33, flat: 0.42 },
+    { x: 8.5, z: -10, r: 0.7, h: 0.35, flat: 0.4 },
+    { x: 7.2, z: -11.5, r: 0.6, h: 0.3, flat: 0.45 },
+  ];
+  stones.forEach(s => {
+    const gy = getGroundHeight(s.x, s.z);
+    const geo = new THREE.CylinderGeometry(s.r * 0.85, s.r, s.h, 9, 1);
+    const verts = geo.attributes.position;
+    for (let i = 0; i < verts.count; i++) {
+      verts.setX(i, verts.getX(i) + (Math.random()-0.5) * s.r * 0.12);
+      verts.setZ(i, verts.getZ(i) + (Math.random()-0.5) * s.r * 0.12);
+    }
+    geo.computeVertexNormals();
+    const stone = new THREE.Mesh(geo, courseRockMat.clone());
+    stone.position.set(s.x, gy + s.h * 0.35, s.z);
+    stone.rotation.y = Math.random() * Math.PI;
+    stone.castShadow = true;
+    stone.receiveShadow = true;
+    scene.add(stone);
+    platformColliders.push({
+      x: s.x, y: gy + s.h * 0.6, z: s.z,
+      hw: s.r * 0.75, hh: s.h * 0.3, hd: s.r * 0.75
+    });
+  });
+  [{ x:7, z:-3.2 }, { x:7.5, z:-6.2 }, { x:7.8, z:-9.2 }].forEach(p => {
+    const puddle = new THREE.Mesh(
+      new THREE.CircleGeometry(1.2, 12),
+      new THREE.MeshStandardMaterial({ color: 0x40B8C8, transparent: true, opacity: 0.35, roughness: 0.1, metalness: 0.3 })
+    );
+    puddle.rotation.x = -Math.PI / 2;
+    puddle.position.set(p.x, getGroundHeight(p.x, p.z) + 0.02, p.z);
+    scene.add(puddle);
+  });
+})();
+
+// === SECTION 3: Sand Mound Ramps ===
+(function createSandMounds() {
+  const mounds = [
+    { x: 8, z: -13, w: 3, h: 0.8, d: 2.5 },
+    { x: 10, z: -15, w: 2.5, h: 1.1, d: 2 },
+    { x: 8.5, z: -17, w: 3.5, h: 0.6, d: 3 },
+    { x: 10.5, z: -19, w: 2, h: 1.4, d: 2 },
+  ];
+  mounds.forEach(m => {
+    const gy = getGroundHeight(m.x, m.z);
+    const geo = new THREE.SphereGeometry(1, 12, 8, 0, Math.PI*2, 0, Math.PI*0.55);
+    geo.scale(m.w * 0.5, m.h, m.d * 0.5);
+    const verts = geo.attributes.position;
+    for (let i = 0; i < verts.count; i++) {
+      verts.setX(i, verts.getX(i) + (Math.random()-0.5)*0.12);
+      verts.setZ(i, verts.getZ(i) + (Math.random()-0.5)*0.12);
+    }
+    geo.computeVertexNormals();
+    const mound = new THREE.Mesh(geo, courseSandMoundMat);
+    mound.position.set(m.x, gy - 0.05, m.z);
+    mound.castShadow = true;
+    mound.receiveShadow = true;
+    scene.add(mound);
+    platformColliders.push({
+      x: m.x, y: gy + m.h * 0.4, z: m.z,
+      hw: m.w * 0.4, hh: m.h * 0.35, hd: m.d * 0.4
+    });
+  });
+})();
+
+// === SECTION 4: Crates, Barrels & Broken Dock ===
+(function createBeachPropSection() {
+  // Stacked crates
+  const cratePositions = [
+    { x: 9, z: -21,  w: 0.8, h: 0.8, d: 0.8, stack: 0 },
+    { x: 10, z: -21.2, w: 0.7, h: 0.7, d: 0.7, stack: 0 },
+    { x: 9.5, z: -21.1, w: 0.65, h: 0.65, d: 0.65, stack: 0.8 },
+  ];
+  cratePositions.forEach(cr => {
+    const gy = getGroundHeight(cr.x, cr.z);
+    const geo = new THREE.BoxGeometry(cr.w, cr.h, cr.d);
+    const mat = courseCrateMat.clone();
+    mat.color.set(new THREE.Color(0xC4A060).lerp(new THREE.Color(0xD4B880), Math.random()*0.4));
+    const crate = new THREE.Mesh(geo, mat);
+    const cy = gy + cr.h * 0.5 + cr.stack;
+    crate.position.set(cr.x, cy, cr.z);
+    crate.rotation.y = Math.random() * 0.3 - 0.15;
+    crate.castShadow = true;
+    crate.receiveShadow = true;
+    scene.add(crate);
+    const edges = new THREE.EdgesGeometry(geo);
+    const lineMat = new THREE.LineBasicMaterial({ color: 0x6A5030, transparent: true, opacity: 0.3 });
+    const lines = new THREE.LineSegments(edges, lineMat);
+    lines.position.copy(crate.position);
+    lines.rotation.copy(crate.rotation);
+    scene.add(lines);
+    platformColliders.push({
+      x: cr.x, y: cy, z: cr.z,
+      hw: cr.w*0.5, hh: cr.h*0.5, hd: cr.d*0.5
+    });
+  });
+
+  // Old barrels
+  [{ x: 11, z: -22, r: 0.3, h: 0.9 }, { x: 11.5, z: -20.5, r: 0.28, h: 0.85 }].forEach(b => {
+    const gy = getGroundHeight(b.x, b.z);
+    const barrel = new THREE.Mesh(
+      new THREE.CylinderGeometry(b.r, b.r * 0.95, b.h, 10),
+      courseBarrelMat.clone()
+    );
+    barrel.position.set(b.x, gy + b.h * 0.5, b.z);
+    barrel.castShadow = true;
+    scene.add(barrel);
+    [0.15, -0.15, 0.35, -0.35].forEach(ry => {
+      const ring = new THREE.Mesh(
+        new THREE.TorusGeometry(b.r + 0.01, 0.012, 4, 12),
+        new THREE.MeshStandardMaterial({ color: 0x5A4A35, roughness: 0.6, metalness: 0.2 })
+      );
+      ring.position.set(b.x, gy + b.h*0.5 + ry, b.z);
+      ring.rotation.x = Math.PI/2;
+      scene.add(ring);
+    });
+    staticColliders.push({ x: b.x, z: b.z, radius: b.r + 0.1 });
+    platformColliders.push({
+      x: b.x, y: gy + b.h * 0.5, z: b.z,
+      hw: b.r, hh: b.h*0.5, hd: b.r
+    });
+  });
+
+  // Broken dock platform
+  const dockX = 10, dockZ = -24;
+  const dockGy = getGroundHeight(dockX, dockZ);
+  const dockGroup = new THREE.Group();
+  [[-1.2, -0.8], [1.2, -0.8], [-1.2, 0.8], [1.2, 0.8]].forEach(([px, pz]) => {
+    const post = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.08, 0.1, 1.2, 5),
+      new THREE.MeshStandardMaterial({ color: 0x7A6545, roughness: 0.9 })
+    );
+    post.position.set(px, 0.5, pz);
+    post.rotation.z = (Math.random()-0.5)*0.08;
+    post.castShadow = true;
+    dockGroup.add(post);
+  });
+  for (let i = -3; i <= 3; i++) {
+    const plank = new THREE.Mesh(
+      new THREE.BoxGeometry(2.8, 0.08, 0.35),
+      coursePlankMat.clone()
+    );
+    plank.position.set(0, 1.0, i * 0.38);
+    plank.rotation.y = (Math.random()-0.5)*0.03;
+    plank.castShadow = true;
+    plank.receiveShadow = true;
+    dockGroup.add(plank);
+  }
+  dockGroup.position.set(dockX, dockGy, dockZ);
+  scene.add(dockGroup);
+  platformColliders.push({
+    x: dockX, y: dockGy + 1.0, z: dockZ,
+    hw: 1.3, hh: 0.1, hd: 1.3
+  });
+})();
+
+// Scattered decorative coconuts around props section
+createGroundCoconut(12, -20);
+createGroundCoconut(8.5, -23);
+
+// === SECTION 5: Palm-Root Spiral (set piece) ===
+(function createPalmSpiral() {
+  const cx = 11, cz = -27;
+  const gy = getGroundHeight(cx, cz);
+  createPalmTree(cx, cz, 9, Math.PI * 0.7, 0.08);
+  staticColliders.push({ x: cx, z: cz, radius: 0.5 });
+
+  const rampSegments = 14;
+  const rampRadius = 1.4;
+  const rampTotalHeight = 3.2;
+  const startAngle = 0;
+  for (let i = 0; i < rampSegments; i++) {
+    const t = i / rampSegments;
+    const angle = startAngle + t * Math.PI * 1.8;
+    const h = gy + 0.3 + t * rampTotalHeight;
+    const rx = cx + Math.cos(angle) * rampRadius;
+    const rz = cz + Math.sin(angle) * rampRadius;
+
+    const plankLen = 1.1;
+    const plank = new THREE.Mesh(
+      new THREE.BoxGeometry(plankLen, 0.08, 0.55),
+      coursePlankMat.clone()
+    );
+    plank.position.set(rx, h, rz);
+    plank.rotation.y = angle + Math.PI/2;
+    plank.rotation.z = 0.1;
+    plank.castShadow = true;
+    plank.receiveShadow = true;
+    scene.add(plank);
+    platformColliders.push({
+      x: rx, y: h, z: rz,
+      hw: 0.5, hh: 0.08, hd: 0.25
+    });
+
+    if (h - gy > 0.5) {
+      const stilt = new THREE.Mesh(
+        new THREE.CylinderGeometry(0.03, 0.04, h - gy, 4),
+        new THREE.MeshStandardMaterial({ color: 0x7A6040, roughness: 0.9 })
+      );
+      stilt.position.set(rx, gy + (h-gy)*0.5, rz);
+      stilt.castShadow = true;
+      scene.add(stilt);
+    }
+  }
+  const topAngle = startAngle + Math.PI * 1.8;
+  const topH = gy + 0.3 + rampTotalHeight;
+  const topX = cx + Math.cos(topAngle) * (rampRadius + 0.5);
+  const topZ = cz + Math.sin(topAngle) * (rampRadius + 0.5);
+  const landingGeo = new THREE.CylinderGeometry(0.9, 1.0, 0.2, 8);
+  const verts = landingGeo.attributes.position;
+  for (let i = 0; i < verts.count; i++) {
+    verts.setX(i, verts.getX(i) + (Math.random()-0.5)*0.1);
+    verts.setZ(i, verts.getZ(i) + (Math.random()-0.5)*0.1);
+  }
+  landingGeo.computeVertexNormals();
+  const landing = new THREE.Mesh(landingGeo, courseRockMat);
+  landing.position.set(topX, topH + 0.1, topZ);
+  landing.castShadow = true;
+  landing.receiveShadow = true;
+  scene.add(landing);
+  platformColliders.push({
+    x: topX, y: topH + 0.1, z: topZ,
+    hw: 0.8, hh: 0.12, hd: 0.8
+  });
+  const leafDeco = new THREE.Mesh(
+    new THREE.PlaneGeometry(1.2, 0.8),
+    new THREE.MeshStandardMaterial({ color: 0x3D8B35, side: THREE.DoubleSide, transparent: true, opacity: 0.6, roughness: 0.6 })
+  );
+  leafDeco.rotation.x = -Math.PI/2;
+  leafDeco.position.set(topX, topH + 0.22, topZ);
+  scene.add(leafDeco);
+})();
+
+// === SECTION 6: Cliffside Ledges & Bridge ===
+(function createCliffsideBridge() {
+  const ledges = [
+    { x: 11, z: -30, w: 1.8, h: 0.6, d: 1.5 },
+    { x: 12.5, z: -30.5, w: 1.5, h: 1.0, d: 1.2 },
+    { x: 14, z: -30, w: 1.6, h: 1.5, d: 1.4 },
+  ];
+  ledges.forEach(l => {
+    const gy = getGroundHeight(l.x, l.z);
+    const geo = new THREE.BoxGeometry(l.w, l.h, l.d);
+    const v = geo.attributes.position;
+    for (let i = 0; i < v.count; i++) {
+      v.setX(i, v.getX(i) + (Math.random()-0.5)*0.08);
+      v.setY(i, v.getY(i) + (Math.random()-0.5)*0.05);
+      v.setZ(i, v.getZ(i) + (Math.random()-0.5)*0.08);
+    }
+    geo.computeVertexNormals();
+    const rock = new THREE.Mesh(geo, courseRockMat.clone());
+    rock.position.set(l.x, gy + l.h*0.5, l.z);
+    rock.castShadow = true;
+    rock.receiveShadow = true;
+    scene.add(rock);
+    platformColliders.push({
+      x: l.x, y: gy + l.h*0.5, z: l.z,
+      hw: l.w*0.5, hh: l.h*0.5, hd: l.d*0.5
+    });
+  });
+
+  const bridgeStartX = 14, bridgeStartZ = -30;
+  const bridgeEndX = 17, bridgeEndZ = -29;
+  const bridgeH = getGroundHeight(bridgeStartX, bridgeStartZ) + 1.5;
+  const bridgeLen = Math.sqrt((bridgeEndX-bridgeStartX)**2 + (bridgeEndZ-bridgeStartZ)**2);
+  const bridgeAngle = Math.atan2(bridgeEndZ-bridgeStartZ, bridgeEndX-bridgeStartX);
+  const bridgeMidX = (bridgeStartX+bridgeEndX)*0.5;
+  const bridgeMidZ = (bridgeStartZ+bridgeEndZ)*0.5;
+
+  const plankCount = 10;
+  for (let i = 0; i < plankCount; i++) {
+    const t = (i + 0.5) / plankCount;
+    const px = bridgeStartX + (bridgeEndX - bridgeStartX) * t;
+    const pz = bridgeStartZ + (bridgeEndZ - bridgeStartZ) * t;
+    const sag = -Math.sin(t * Math.PI) * 0.15;
+    const plank = new THREE.Mesh(
+      new THREE.BoxGeometry(0.35, 0.06, 0.9),
+      coursePlankMat.clone()
+    );
+    plank.position.set(px, bridgeH + sag, pz);
+    plank.rotation.y = bridgeAngle;
+    plank.castShadow = true;
+    plank.receiveShadow = true;
+    scene.add(plank);
+  }
+  platformColliders.push({
+    x: bridgeMidX, y: bridgeH - 0.05, z: bridgeMidZ,
+    hw: bridgeLen * 0.5, hh: 0.08, hd: 0.4
+  });
+
+  const railMat = new THREE.MeshStandardMaterial({ color: 0x8B7A5A, roughness: 0.9 });
+  [-0.4, 0.4].forEach(offset => {
+    const rail = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.02, 0.02, bridgeLen + 0.3, 4),
+      railMat
+    );
+    rail.position.set(bridgeMidX + Math.sin(bridgeAngle)*offset, bridgeH + 0.35, bridgeMidZ - Math.cos(bridgeAngle)*offset);
+    rail.rotation.z = Math.PI/2;
+    rail.rotation.y = -bridgeAngle;
+    scene.add(rail);
+  });
+
+  [0, 1].forEach(end => {
+    const px = end === 0 ? bridgeStartX : bridgeEndX;
+    const pz = end === 0 ? bridgeStartZ : bridgeEndZ;
+    [-0.4, 0.4].forEach(offset => {
+      const post = new THREE.Mesh(
+        new THREE.CylinderGeometry(0.04, 0.05, 0.8, 5),
+        railMat
+      );
+      post.position.set(px + Math.sin(bridgeAngle)*offset, bridgeH + 0.35, pz - Math.cos(bridgeAngle)*offset);
+      post.castShadow = true;
+      scene.add(post);
+    });
+  });
+})();
+
+// === SECTION 7: Finish Pedestal ===
+(function createFinishPedestal() {
+  const px = 18, pz = -28.5;
+  const gy = getGroundHeight(px, pz);
+  const group = new THREE.Group();
+
+  [{ r: 1.4, h: 0.3, y: 0.15 }, { r: 1.1, h: 0.3, y: 0.45 }, { r: 0.8, h: 0.35, y: 0.8 }].forEach(tier => {
+    const geo = new THREE.CylinderGeometry(tier.r * 0.92, tier.r, tier.h, 10);
+    const v = geo.attributes.position;
+    for (let i = 0; i < v.count; i++) {
+      v.setX(i, v.getX(i) + (Math.random()-0.5)*0.06);
+      v.setZ(i, v.getZ(i) + (Math.random()-0.5)*0.06);
+    }
+    geo.computeVertexNormals();
+    const step = new THREE.Mesh(geo, new THREE.MeshStandardMaterial({
+      color: new THREE.Color(0xB8A888).lerp(new THREE.Color(0xD4C8A8), tier.y * 0.5),
+      roughness: 0.7, metalness: 0.05
+    }));
+    step.position.y = tier.y;
+    step.castShadow = true;
+    step.receiveShadow = true;
+    group.add(step);
+  });
+
+  const pole = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.04, 0.04, 2, 6),
+    new THREE.MeshStandardMaterial({ color: 0xC8B888, roughness: 0.6, metalness: 0.1 })
+  );
+  pole.position.y = 2;
+  pole.castShadow = true;
+  group.add(pole);
+
+  const bannerCanvas = document.createElement('canvas');
+  bannerCanvas.width = 128; bannerCanvas.height = 64;
+  const bctx = bannerCanvas.getContext('2d');
+  bctx.fillStyle = '#F5E8C8'; bctx.fillRect(0, 0, 128, 64);
+  bctx.fillStyle = '#6A5030'; bctx.font = 'bold 14px Georgia'; bctx.textAlign = 'center';
+  bctx.fillText('FINISH', 64, 25);
+  bctx.font = 'italic 10px Georgia'; bctx.fillStyle = '#8A7555';
+  bctx.fillText('You did it, coconut.', 64, 44);
+  for (let i = 0; i < 200; i++) {
+    bctx.fillStyle = `rgba(180,160,130,${Math.random()*0.08})`;
+    bctx.fillRect(Math.random()*128, Math.random()*64, 2, 2);
+  }
+  const bannerTex = new THREE.CanvasTexture(bannerCanvas);
+  const banner = new THREE.Mesh(
+    new THREE.PlaneGeometry(0.9, 0.45),
+    new THREE.MeshStandardMaterial({ map: bannerTex, side: THREE.DoubleSide, roughness: 0.8 })
+  );
+  banner.position.set(0.5, 2.6, 0);
+  banner.rotation.y = -0.3;
+  group.add(banner);
+
+  const glowGeo = new THREE.SphereGeometry(0.12, 8, 8);
+  const glowMat = new THREE.MeshBasicMaterial({
+    color: 0xFFD700, transparent: true, opacity: 0.5
+  });
+  const glow = new THREE.Mesh(glowGeo, glowMat);
+  glow.position.y = 3.1;
+  glow.name = 'finishGlow';
+  group.add(glow);
+
+  group.position.set(px, gy, pz);
+  scene.add(group);
+
+  platformColliders.push({
+    x: px, y: gy + 0.5, z: pz,
+    hw: 1.3, hh: 0.5, hd: 1.3
+  });
+  platformColliders.push({
+    x: px, y: gy + 0.95, z: pz,
+    hw: 0.7, hh: 0.2, hd: 0.7
+  });
+
+  createGroundCoconut(px - 1.8, pz + 0.5);
+  createGroundCoconut(px + 1.5, pz - 0.8);
+  createGroundCoconut(px - 0.5, pz + 1.8);
+})();
+
+// Course decorative elements
+createShell(5.5, 7);
+createShell(8, -4);
+createShell(12, -22);
+createStarfish(7, -1);
+createStarfish(10, -19);
+
 // Seagulls
 for (let i = 0; i < 4; i++) createSeagull();
 
@@ -1215,7 +1705,7 @@ renderer.domElement.addEventListener('click', () => {
 document.addEventListener('mousemove', e => {
   if (document.pointerLockElement === renderer.domElement && isPlaying && !isPaused) {
     cameraYaw -= e.movementX * 0.003;
-    cameraPitch = Math.max(-0.2, Math.min(1.2, cameraPitch - e.movementY * 0.003));
+    cameraPitch = Math.max(-0.5, Math.min(1.5, cameraPitch - e.movementY * 0.003));
   }
 });
 document.addEventListener('pointerlockchange', () => {
@@ -1262,7 +1752,46 @@ function updatePhysics(dt) {
 
   // Ground collision
   const gInfo = getGroundInfo(coconut.pos.x, coconut.pos.z);
-  const gY = gInfo.height + COCONUT_RADIUS;
+  let gY = gInfo.height + COCONUT_RADIUS;
+
+  // Platform collision (AABB boxes coconut can roll on top of)
+  let onPlatform = false;
+  for (let i = 0; i < platformColliders.length; i++) {
+    const p = platformColliders[i];
+    const dx = coconut.pos.x - p.x;
+    const dy = coconut.pos.y - p.y;
+    const dz = coconut.pos.z - p.z;
+    const ox = Math.abs(dx) - (p.hw + COCONUT_RADIUS);
+    const oy = Math.abs(dy) - (p.hh + COCONUT_RADIUS);
+    const oz = Math.abs(dz) - (p.hd + COCONUT_RADIUS);
+    if (ox < 0 && oy < 0 && oz < 0) {
+      // Find shallowest penetration axis
+      if (oy > ox && oy > oz) {
+        // vertical collision (top or bottom)
+        if (dy > 0) {
+          // coconut is above platform
+          const platTop = p.y + p.hh + COCONUT_RADIUS;
+          if (platTop > gY) { gY = platTop; onPlatform = true; }
+        } else {
+          // coconut is below - bump down
+          coconut.pos.y = p.y - p.hh - COCONUT_RADIUS;
+          if (coconut.vel.y > 0) coconut.vel.y = 0;
+        }
+      } else if (ox > oz) {
+        // x-axis push
+        const sign = dx > 0 ? 1 : -1;
+        coconut.pos.x = p.x + sign * (p.hw + COCONUT_RADIUS);
+        const dot = coconut.vel.x * sign;
+        if (dot < 0) { coconut.vel.x *= -0.3; coconut.vel.x *= 0.6; }
+      } else {
+        // z-axis push
+        const sign = dz > 0 ? 1 : -1;
+        coconut.pos.z = p.z + sign * (p.hd + COCONUT_RADIUS);
+        const dot = coconut.vel.z * sign;
+        if (dot < 0) { coconut.vel.z *= -0.3; coconut.vel.z *= 0.6; }
+      }
+    }
+  }
 
   if (coconut.pos.y <= gY) {
     coconut.pos.y = gY;
@@ -1278,9 +1807,17 @@ function updatePhysics(dt) {
     coconut.vel.x += slopeForce.x;
     coconut.vel.z += slopeForce.z;
 
-    // Ground friction
-    coconut.vel.x *= cfg.friction;
-    coconut.vel.z *= cfg.friction;
+    // Ground friction — much heavier on platforms so coconut stops
+    if (onPlatform) {
+      coconut.vel.x *= 0.82;
+      coconut.vel.z *= 0.82;
+      // Kill very small velocities outright
+      if (Math.abs(coconut.vel.x) < 0.02) coconut.vel.x = 0;
+      if (Math.abs(coconut.vel.z) < 0.02) coconut.vel.z = 0;
+    } else {
+      coconut.vel.x *= cfg.friction;
+      coconut.vel.z *= cfg.friction;
+    }
   } else {
     coconut.onGround = false;
   }
@@ -1299,10 +1836,10 @@ function updatePhysics(dt) {
 
   // Boundaries
   coconut.pos.x = Math.max(-55, Math.min(55, coconut.pos.x));
-  coconut.pos.z = Math.max(-22, Math.min(55, coconut.pos.z));
+  coconut.pos.z = Math.max(-38, Math.min(55, coconut.pos.z));
 
-  // Water boundary - gentle push back
-  if (coconut.pos.z < -18) {
+  // Water boundary - gentle push back (only outside parkour area x<3)
+  if (coconut.pos.z < -18 && coconut.pos.x < 3) {
     coconut.vel.z += ((-18) - coconut.pos.z) * 2 * dt;
   }
 
@@ -1545,6 +2082,13 @@ function updateSeagulls(dt) {
         child.rotation.x = Math.sin(t * 3 + sg.angle * 2) * 0.4 * child._side;
       }
     });
+  });
+  // Finish pedestal glow pulse
+  scene.traverse(obj => {
+    if (obj.name === 'finishGlow') {
+      obj.material.opacity = 0.3 + Math.sin(t * 2) * 0.2;
+      obj.scale.setScalar(1 + Math.sin(t * 1.5) * 0.15);
+    }
   });
 }
 
