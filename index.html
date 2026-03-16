@@ -255,7 +255,7 @@ const renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'hi
 renderer.setSize(window.innerWidth, window.innerHeight);
 renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
 renderer.shadowMap.enabled = true;
-renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+renderer.shadowMap.type = THREE.PCFShadowMap;
 renderer.toneMapping = THREE.ACESFilmicToneMapping;
 renderer.toneMappingExposure = 1.3;
 renderer.outputEncoding = THREE.sRGBEncoding;
@@ -271,8 +271,8 @@ scene.add(hemiLight);
 const sunLight = new THREE.DirectionalLight(0xFFF0CC, 1.8);
 sunLight.position.set(35, 45, 25);
 sunLight.castShadow = true;
-sunLight.shadow.mapSize.width = 4096;
-sunLight.shadow.mapSize.height = 4096;
+sunLight.shadow.mapSize.width = 2048;
+sunLight.shadow.mapSize.height = 2048;
 sunLight.shadow.camera.near = 0.5;
 sunLight.shadow.camera.far = 180;
 sunLight.shadow.camera.left = -65;
@@ -296,6 +296,7 @@ scene.add(rimLight);
 // Warm point light near shore for golden glow
 const shoreGlow = new THREE.PointLight(0xFFE8C0, 0.25, 40, 2);
 shoreGlow.position.set(0, 3, -10);
+shoreGlow.castShadow = false;
 scene.add(shoreGlow);
 
 // ===== PROCEDURAL TEXTURES =====
@@ -321,7 +322,7 @@ function createSandTexture() {
   }
 
   // Fine grain noise (denser)
-  for (let i = 0; i < 35000; i++) {
+  for (let i = 0; i < 15000; i++) {
     const x = Math.random() * 1024, y = Math.random() * 1024;
     const b = (Math.random() - 0.5) * 18;
     const a = 0.04 + Math.random() * 0.07;
@@ -677,7 +678,7 @@ const leafTex = createLeafTexture();
 const rockTex = createRockTexture();
 
 // ===== ENVIRONMENT: SAND =====
-const sandGeo = new THREE.PlaneGeometry(140, 140, 70, 70);
+const sandGeo = new THREE.PlaneGeometry(140, 140, 50, 50);
 sandGeo.rotateX(-Math.PI / 2);
 const sv = sandGeo.attributes.position;
 for (let i = 0; i < sv.count; i++) {
@@ -700,7 +701,7 @@ sandMesh.receiveShadow = true;
 scene.add(sandMesh);
 
 // ===== ENVIRONMENT: WATER =====
-waterGeo = new THREE.PlaneGeometry(400, 280, 80, 80);
+waterGeo = new THREE.PlaneGeometry(400, 280, 40, 40);
 waterGeo.rotateX(-Math.PI / 2);
 const waterMat = new THREE.MeshStandardMaterial({
   color: 0x18A8B8, transparent: true, opacity: 0.72,
@@ -849,7 +850,7 @@ function createPalmTree(x, z, height, leanDir, leanAmt) {
     group.add(frond);
 
     // Add individual leaflets along the frond
-    const leaflets = 6;
+    const leaflets = 3;
     for (let j = 1; j <= leaflets; j++) {
       const lt = j / leaflets;
       const ls = new THREE.Shape();
@@ -858,7 +859,7 @@ function createPalmTree(x, z, height, leanDir, leanAmt) {
       ls.moveTo(0, 0);
       ls.quadraticCurveTo(lw, ll*0.5, 0, ll);
       ls.quadraticCurveTo(-lw, ll*0.5, 0, 0);
-      const lg = new THREE.ShapeGeometry(ls, 2);
+      const lg = new THREE.ShapeGeometry(ls, 1);
       const lm = new THREE.MeshStandardMaterial({
         color: new THREE.Color(0x1B5E20).lerp(new THREE.Color(0x4CAF50), Math.random()*0.3),
         side: THREE.DoubleSide, roughness: 0.7
@@ -872,7 +873,7 @@ function createPalmTree(x, z, height, leanDir, leanAmt) {
       leaflet.position.x += Math.cos(angle) * lt * length * 0.3;
       leaflet.position.z += Math.sin(angle) * lt * length * 0.3;
       leaflet.position.y += (1 - lt) * 0.5;
-      leaflet.castShadow = true;
+      leaflet.castShadow = false;
       group.add(leaflet);
     }
   }
@@ -1239,8 +1240,8 @@ staticColliders.push({ x: -15, z: 12, radius: 0.3 });
   const cliffMat = new THREE.MeshStandardMaterial({ color: 0x7A7060, roughness: 0.9, metalness: 0.05 });
   const cliffHighMat = new THREE.MeshStandardMaterial({ color: 0x6A6050, roughness: 0.92, metalness: 0.04 });
   // Main cliff ridge
-  for (let i = 0; i < 18; i++) {
-    const x = -90 + i * 11 + (Math.random()-0.5)*5;
+  for (let i = 0; i < 10; i++) {
+    const x = -90 + i * 19 + (Math.random()-0.5)*5;
     const h = 8 + Math.random() * 14;
     const w = 6 + Math.random() * 8;
     const d = 4 + Math.random() * 6;
@@ -1254,7 +1255,7 @@ staticColliders.push({ x: -15, z: 12, radius: 0.3 });
     scene.add(m);
   }
   // Cliff accent peaks
-  for (let i = 0; i < 10; i++) {
+  for (let i = 0; i < 5; i++) {
     const x = -80 + Math.random() * 160;
     const h = 12 + Math.random() * 8;
     const geo = new THREE.ConeGeometry(3 + Math.random()*4, h, 5 + Math.floor(Math.random()*3));
@@ -1267,7 +1268,7 @@ staticColliders.push({ x: -15, z: 12, radius: 0.3 });
   // --- Distant palm tree silhouettes on cliffs ---
   const distPalmTrunkMat = new THREE.MeshStandardMaterial({ color: 0x4A4530, roughness: 0.9 });
   const distPalmLeafMat = new THREE.MeshStandardMaterial({ color: 0x3A5A30, roughness: 0.85, side: THREE.DoubleSide });
-  for (let i = 0; i < 14; i++) {
+  for (let i = 0; i < 7; i++) {
     const x = -75 + Math.random() * 150;
     const cliffZ = -115 - Math.random() * 20;
     const baseY = 6 + Math.random() * 10;
@@ -1324,8 +1325,8 @@ staticColliders.push({ x: -15, z: 12, radius: 0.3 });
 
   // --- Cloud wisps in the distance ---
   const cloudMat = new THREE.MeshBasicMaterial({ color: 0xFFFFFF, transparent: true, opacity: 0.25, fog: false });
-  for (let i = 0; i < 8; i++) {
-    const cg = new THREE.SphereGeometry(3 + Math.random()*5, 8, 6);
+  for (let i = 0; i < 4; i++) {
+    const cg = new THREE.SphereGeometry(3 + Math.random()*5, 6, 4);
     cg.scale(2 + Math.random(), 0.4, 1);
     const cm = new THREE.Mesh(cg, cloudMat);
     cm.position.set(-80 + Math.random()*160, 25 + Math.random()*15, -100 - Math.random()*60);
@@ -1344,11 +1345,10 @@ staticColliders.push({ x: -15, z: 12, radius: 0.3 });
   });
   const grassPositions = [
     [35, 30], [-32, 35], [25, 40], [-18, 42], [38, 15], [-35, 10],
-    [42, 5], [-40, 25], [30, -8], [-25, -5], [45, 28], [-42, 32],
-    [15, 38], [-10, 45], [50, 18], [-48, 15]
+    [42, 5], [-40, 25]
   ];
   grassPositions.forEach(([x, z]) => {
-    const count = 5 + Math.floor(Math.random() * 8);
+    const count = 3 + Math.floor(Math.random() * 4);
     for (let i = 0; i < count; i++) {
       const blade = new THREE.Mesh(
         new THREE.PlaneGeometry(0.08 + Math.random()*0.05, 0.4 + Math.random()*0.6),
@@ -1361,7 +1361,7 @@ staticColliders.push({ x: -15, z: 12, radius: 0.3 });
         z + (Math.random()-0.5)*1.5
       );
       blade.rotation.set(-0.1 + Math.random()*0.3, Math.random()*Math.PI*2, (Math.random()-0.5)*0.4);
-      blade.castShadow = true;
+      blade.castShadow = false;
       scene.add(blade);
     }
   });
@@ -1370,8 +1370,7 @@ staticColliders.push({ x: -15, z: 12, radius: 0.3 });
   const bushMat = new THREE.MeshStandardMaterial({ color: 0x3D6B28, roughness: 0.88 });
   const bushLightMat = new THREE.MeshStandardMaterial({ color: 0x5A8A3A, roughness: 0.85 });
   const bushPositions = [
-    [38, 32], [-36, 36], [44, 10], [-42, 20], [32, 42],
-    [-30, 40], [48, 22], [-46, 8]
+    [38, 32], [-36, 36], [44, 10], [-42, 20]
   ];
   bushPositions.forEach(([x, z]) => {
     const gy = getGroundHeight(x, z);
@@ -1383,7 +1382,7 @@ staticColliders.push({ x: -15, z: 12, radius: 0.3 });
       const m = new THREE.Mesh(geo, Math.random() > 0.5 ? bushMat : bushLightMat);
       m.position.set((Math.random()-0.5)*0.8, r * 0.6, (Math.random()-0.5)*0.8);
       m.scale.y = 0.5 + Math.random()*0.3;
-      m.castShadow = true;
+      m.castShadow = false;
       bushGroup.add(m);
     }
     bushGroup.position.set(x, gy, z);
@@ -1394,7 +1393,7 @@ staticColliders.push({ x: -15, z: 12, radius: 0.3 });
   const seaweedMat = new THREE.MeshStandardMaterial({
     color: 0x2A5A30, roughness: 0.8, side: THREE.DoubleSide, transparent: true, opacity: 0.85
   });
-  for (let i = 0; i < 10; i++) {
+  for (let i = 0; i < 4; i++) {
     const x = -30 + Math.random() * 60;
     const z = -17 + Math.random() * 4;
     const patch = new THREE.Group();
@@ -1423,7 +1422,7 @@ staticColliders.push({ x: -15, z: 12, radius: 0.3 });
     const post = new THREE.Mesh(new THREE.CylinderGeometry(0.08, 0.1, h, 5), postMat);
     post.position.set(x, gy + h/2, z);
     post.rotation.set((Math.random()-0.5)*0.1, 0, (Math.random()-0.5)*0.08);
-    post.castShadow = true;
+    post.castShadow = false;
     scene.add(post);
   });
 
@@ -1440,7 +1439,7 @@ staticColliders.push({ x: -15, z: 12, radius: 0.3 });
     );
     const tubeGeo = new THREE.TubeGeometry(curve, 12, 0.02, 4, false);
     const rope = new THREE.Mesh(tubeGeo, ropeMat);
-    rope.castShadow = true;
+    rope.castShadow = false;
     scene.add(rope);
   });
 
@@ -1460,7 +1459,7 @@ staticColliders.push({ x: -15, z: 12, radius: 0.3 });
   });
 
   // --- Extra driftwood piles ---
-  for (let i = 0; i < 4; i++) {
+  for (let i = 0; i < 2; i++) {
     const pileX = -30 + Math.random() * 60, pileZ = -14 + Math.random() * 12;
     const gy = getGroundHeight(pileX, pileZ);
     const pile = new THREE.Group();
@@ -1471,7 +1470,7 @@ staticColliders.push({ x: -15, z: 12, radius: 0.3 });
       const stick = new THREE.Mesh(new THREE.CylinderGeometry(0.02, 0.03, len, 4), stickMat);
       stick.position.set((Math.random()-0.5)*0.5, 0.05, (Math.random()-0.5)*0.5);
       stick.rotation.set(Math.PI/2 * 0.8 + (Math.random()-0.5)*0.6, 0, Math.random()*Math.PI);
-      stick.castShadow = true;
+      stick.castShadow = false;
       pile.add(stick);
     }
     pile.position.set(pileX, gy, pileZ);
@@ -1495,7 +1494,7 @@ staticColliders.push({ x: -15, z: 12, radius: 0.3 });
       );
       const hammockGeo = new THREE.TubeGeometry(curve, 16, 0.3, 6, false);
       const hammock = new THREE.Mesh(hammockGeo, hammockMat);
-      hammock.castShadow = true;
+      hammock.castShadow = false;
       scene.add(hammock);
     }
   }
@@ -1504,7 +1503,7 @@ staticColliders.push({ x: -15, z: 12, radius: 0.3 });
   const pebbleMat = new THREE.MeshStandardMaterial({ color: 0x9A8A78, roughness: 0.85 });
   const pebbleLightMat = new THREE.MeshStandardMaterial({ color: 0xB8A894, roughness: 0.8 });
   const pebbleDarkMat = new THREE.MeshStandardMaterial({ color: 0x7A6A58, roughness: 0.9 });
-  for (let i = 0; i < 60; i++) {
+  for (let i = 0; i < 25; i++) {
     const x = (Math.random()-0.5) * 80, z = -16 + Math.random() * 55;
     const gy = getGroundHeight(x, z);
     const s = 0.04 + Math.random() * 0.08;
@@ -1542,7 +1541,7 @@ staticColliders.push({ x: -15, z: 12, radius: 0.3 });
   const dryLeafMat = new THREE.MeshStandardMaterial({
     color: 0x9A8A40, roughness: 0.9, side: THREE.DoubleSide, transparent: true, opacity: 0.65
   });
-  for (let i = 0; i < 30; i++) {
+  for (let i = 0; i < 12; i++) {
     const x = (Math.random()-0.5) * 60, z = -10 + Math.random() * 50;
     const gy = getGroundHeight(x, z);
     const leaf = new THREE.Mesh(
@@ -3754,7 +3753,7 @@ function animate() {
 
   // Always animate environment for visual appeal (skip in realistic for perf)
   if (gameMode !== 'realistic') {
-    updateWater(dt);
+    if (frameCount % 2 === 0) updateWater(dt);
     updateSeagulls(dt);
   }
 
