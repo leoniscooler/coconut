@@ -29,6 +29,7 @@ canvas{display:block}
 #hud-mode{position:absolute;top:20px;left:24px;color:rgba(255,255,255,0.6);font-size:0.78em;letter-spacing:4px;text-transform:uppercase}
 #hud-score-box{position:absolute;top:18px;right:24px;text-align:right}
 #hud-score{color:rgba(255,255,255,0.85);font-size:1.3em}
+#hud-highscore{color:rgba(255,215,0,0.45);font-size:0.72em;margin-top:2px}
 #hud-time{color:rgba(255,255,255,0.45);font-size:0.75em;margin-top:2px}
 #hud-next{color:rgba(255,215,0,0.5);font-size:0.65em;margin-top:4px}
 #hud-subtitle{position:absolute;bottom:55px;width:100%;text-align:center;color:rgba(255,255,255,0.35);font-size:0.85em;font-style:italic}
@@ -115,6 +116,7 @@ canvas{display:block}
   <div id="hud-mode">REALISTIC</div>
   <div id="hud-score-box">
     <div id="hud-score">0</div>
+    <div id="hud-highscore">Best: 0</div>
     <div id="hud-time">00:00:00</div>
     <div id="hud-next">Next: Beginner Coconut (3,600)</div>
   </div>
@@ -171,13 +173,13 @@ const ACHIEVEMENTS = [
 // ===== MODE CONFIGS =====
 const MODES = {
   realistic: {
-    moveForce: 0.12, maxSpeed: 0.35, friction: 0.965, angularFriction: 0.955,
-    canJump: false, jumpForce: 0, wobbleAmt: 0.004, spinMult: 1.0, bounceMult: 0.15,
+    moveForce: 0.15, maxSpeed: 0.40, friction: 0.978, angularFriction: 0.97,
+    canJump: false, jumpForce: 0, wobbleAmt: 0.003, spinMult: 1.0, bounceMult: 0.12,
     label: 'REALISTIC'
   },
   arcade: {
-    moveForce: 0.7, maxSpeed: 2.8, friction: 0.975, angularFriction: 0.965,
-    canJump: true, jumpForce: 4.5, wobbleAmt: 0.018, spinMult: 3.5, bounceMult: 0.45,
+    moveForce: 0.8, maxSpeed: 3.0, friction: 0.985, angularFriction: 0.975,
+    canJump: true, jumpForce: 4.5, wobbleAmt: 0.015, spinMult: 3.5, bounceMult: 0.4,
     label: 'ARCADE'
   }
 };
@@ -192,6 +194,7 @@ let isPaused = false;
 let totalScore = 0;
 let sessionScore = 0;
 let scoreAccum = 0;
+let highScore = 0;
 let unlockedAchs = [];
 let audioCtx = null;
 let achPanelOpen = false;
@@ -204,7 +207,9 @@ let cameraYaw = 0;
 let cameraPitch = 0.35;
 const CAM_DIST = 3.8;
 const CAM_HEIGHT_BASE = 1.6;
-const CAM_SMOOTH = 4.5;
+const CAM_SMOOTH = 6.0;
+const INPUT_SMOOTH = 0.15;
+let smoothInputX = 0, smoothInputZ = 0;
 
 // Coconut physics state
 const coconut = {
@@ -218,6 +223,7 @@ const coconut = {
 // Dynamic objects
 const crabs = [];
 const groundCoconuts = [];
+const knockableObjects = []; // {mesh, vx, vy, vz, radius, settled}
 const staticColliders = []; // {x, z, radius} for solid objects
 const platformColliders = []; // {x,y,z, hw,hh,hd} AABB boxes coconut can roll on
 let waterGeo = null;
@@ -226,12 +232,14 @@ let waterGeo = null;
 function loadState() {
   try {
     totalScore = parseInt(localStorage.getItem('coco_score') || '0');
+    highScore = parseInt(localStorage.getItem('coco_highscore') || '0');
     unlockedAchs = JSON.parse(localStorage.getItem('coco_achs') || '[]');
-  } catch(e) { totalScore = 0; unlockedAchs = []; }
+  } catch(e) { totalScore = 0; highScore = 0; unlockedAchs = []; }
 }
 function saveState() {
   try {
     localStorage.setItem('coco_score', totalScore.toString());
+    localStorage.setItem('coco_highscore', highScore.toString());
     localStorage.setItem('coco_achs', JSON.stringify(unlockedAchs));
   } catch(e) {}
 }
@@ -239,8 +247,8 @@ loadState();
 
 // ===== THREE.JS SETUP =====
 const scene = new THREE.Scene();
-scene.background = new THREE.Color(0x78BEE6);
-scene.fog = new THREE.FogExp2(0xA8CCE0, 0.0055);
+scene.background = new THREE.Color(0x6AB4E0);
+scene.fog = new THREE.FogExp2(0xB0D4E8, 0.004);
 
 const camera = new THREE.PerspectiveCamera(52, window.innerWidth / window.innerHeight, 0.1, 500);
 const renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance' });
@@ -254,82 +262,163 @@ renderer.outputEncoding = THREE.sRGBEncoding;
 document.body.appendChild(renderer.domElement);
 
 // ===== LIGHTING =====
-const ambientLight = new THREE.AmbientLight(0x6688AA, 0.45);
+const ambientLight = new THREE.AmbientLight(0x7799BB, 0.5);
 scene.add(ambientLight);
 
-const hemiLight = new THREE.HemisphereLight(0x87CEEB, 0xE8D5B0, 0.55);
+const hemiLight = new THREE.HemisphereLight(0x87CEEB, 0xE8D5B0, 0.6);
 scene.add(hemiLight);
 
-const sunLight = new THREE.DirectionalLight(0xFFF2D6, 1.6);
+const sunLight = new THREE.DirectionalLight(0xFFF0CC, 1.8);
 sunLight.position.set(35, 45, 25);
 sunLight.castShadow = true;
-sunLight.shadow.mapSize.width = 2048;
-sunLight.shadow.mapSize.height = 2048;
+sunLight.shadow.mapSize.width = 4096;
+sunLight.shadow.mapSize.height = 4096;
 sunLight.shadow.camera.near = 0.5;
-sunLight.shadow.camera.far = 150;
-sunLight.shadow.camera.left = -55;
-sunLight.shadow.camera.right = 55;
-sunLight.shadow.camera.top = 55;
-sunLight.shadow.camera.bottom = -55;
-sunLight.shadow.bias = -0.0008;
-sunLight.shadow.normalBias = 0.02;
+sunLight.shadow.camera.far = 180;
+sunLight.shadow.camera.left = -65;
+sunLight.shadow.camera.right = 65;
+sunLight.shadow.camera.top = 65;
+sunLight.shadow.camera.bottom = -65;
+sunLight.shadow.bias = -0.0006;
+sunLight.shadow.normalBias = 0.015;
 scene.add(sunLight);
 
-// Subtle warm fill from opposite side
-const fillLight = new THREE.DirectionalLight(0xFFE0B0, 0.3);
+// Subtle warm fill from opposite side (golden bounce light)
+const fillLight = new THREE.DirectionalLight(0xFFD8A0, 0.35);
 fillLight.position.set(-20, 10, -15);
 scene.add(fillLight);
+
+// Rim light (soft back-light for depth)
+const rimLight = new THREE.DirectionalLight(0xE0F0FF, 0.2);
+rimLight.position.set(0, 20, -50);
+scene.add(rimLight);
+
+// Warm point light near shore for golden glow
+const shoreGlow = new THREE.PointLight(0xFFE8C0, 0.25, 40, 2);
+shoreGlow.position.set(0, 3, -10);
+scene.add(shoreGlow);
 
 // ===== PROCEDURAL TEXTURES =====
 function createSandTexture() {
   const c = document.createElement('canvas'); c.width = 1024; c.height = 1024;
   const ctx = c.getContext('2d');
-  // Warm light tan base
+  // Warm light tan base with subtle variation
   const baseGrad = ctx.createRadialGradient(512, 512, 50, 512, 512, 720);
   baseGrad.addColorStop(0, '#FFF5E0');
   baseGrad.addColorStop(0.5, '#F5E6CC');
   baseGrad.addColorStop(1, '#EDD9BC');
   ctx.fillStyle = baseGrad; ctx.fillRect(0, 0, 1024, 1024);
-  // Fine grain noise
-  for (let i = 0; i < 25000; i++) {
+
+  // Damp sand zones (darker, smoother areas near bottom)
+  for (let i = 0; i < 6; i++) {
+    const x = Math.random() * 1024, y = 600 + Math.random() * 400;
+    const r = 60 + Math.random() * 120;
+    const g = ctx.createRadialGradient(x, y, r * 0.2, x, y, r);
+    g.addColorStop(0, 'rgba(190,170,135,0.18)');
+    g.addColorStop(0.6, 'rgba(185,165,128,0.08)');
+    g.addColorStop(1, 'rgba(190,170,135,0)');
+    ctx.fillStyle = g; ctx.fillRect(x - r, y - r, r * 2, r * 2);
+  }
+
+  // Fine grain noise (denser)
+  for (let i = 0; i < 35000; i++) {
     const x = Math.random() * 1024, y = Math.random() * 1024;
-    const b = (Math.random() - 0.5) * 16;
-    const a = 0.06 + Math.random() * 0.08;
+    const b = (Math.random() - 0.5) * 18;
+    const a = 0.04 + Math.random() * 0.07;
     ctx.fillStyle = `rgba(${220+b|0},${205+b|0},${175+b|0},${a})`;
     ctx.fillRect(x, y, 1, 1);
   }
-  // Soft bumps / surface dents
-  for (let i = 0; i < 60; i++) {
+
+  // Surface dents and shallow depressions
+  for (let i = 0; i < 80; i++) {
     const x = Math.random() * 1024, y = Math.random() * 1024;
-    const r = 3 + Math.random() * 12;
-    ctx.fillStyle = `rgba(200,185,155,${0.04 + Math.random()*0.04})`;
-    ctx.beginPath(); ctx.ellipse(x, y, r, r * (0.6+Math.random()*0.6), Math.random()*Math.PI, 0, Math.PI*2); ctx.fill();
+    const r = 3 + Math.random() * 14;
+    ctx.fillStyle = `rgba(195,180,150,${0.04 + Math.random()*0.05})`;
+    ctx.beginPath(); ctx.ellipse(x, y, r, r * (0.5+Math.random()*0.7), Math.random()*Math.PI, 0, Math.PI*2); ctx.fill();
   }
-  // Smooth ripple bands
-  for (let i = 0; i < 55; i++) {
+
+  // Wind ripple bands (more prominent)
+  for (let i = 0; i < 70; i++) {
     const y = Math.random() * 1024;
-    const wave = Math.random() * 6;
-    ctx.strokeStyle = `rgba(215,198,168,${0.06 + Math.random()*0.06})`;
-    ctx.lineWidth = 1.5 + Math.random() * 1.5;
+    const wave = Math.random() * 7;
+    ctx.strokeStyle = `rgba(210,193,162,${0.06 + Math.random()*0.07})`;
+    ctx.lineWidth = 1 + Math.random() * 2;
     ctx.beginPath(); ctx.moveTo(0, y);
     ctx.bezierCurveTo(256, y + wave, 512, y - wave, 768, y + wave*0.5);
     ctx.bezierCurveTo(896, y - wave*0.3, 1024, y + wave*0.2, 1024, y);
     ctx.stroke();
   }
+
+  // Small dune lines (fainter long curves)
+  for (let i = 0; i < 12; i++) {
+    const y = Math.random() * 1024;
+    ctx.strokeStyle = `rgba(200,185,155,${0.03 + Math.random()*0.04})`;
+    ctx.lineWidth = 3 + Math.random() * 4;
+    ctx.beginPath(); ctx.moveTo(0, y);
+    ctx.bezierCurveTo(340, y + (Math.random()-0.5)*20, 680, y + (Math.random()-0.5)*20, 1024, y + (Math.random()-0.5)*15);
+    ctx.stroke();
+  }
+
+  // Tiny pebbles
+  for (let i = 0; i < 50; i++) {
+    const x = Math.random() * 1024, y = Math.random() * 1024;
+    const r = 1.5 + Math.random() * 3;
+    const shade = 140 + Math.random() * 50 | 0;
+    ctx.fillStyle = `rgba(${shade},${shade-10},${shade-25},${0.2 + Math.random()*0.2})`;
+    ctx.beginPath(); ctx.ellipse(x, y, r, r * (0.7+Math.random()*0.4), Math.random()*Math.PI, 0, Math.PI*2); ctx.fill();
+  }
+
+  // Broken shell fragments
+  for (let i = 0; i < 30; i++) {
+    const x = Math.random() * 1024, y = Math.random() * 1024;
+    const s = 2 + Math.random() * 5;
+    const colors = ['rgba(255,245,230,0.25)', 'rgba(240,220,200,0.2)', 'rgba(255,240,220,0.18)', 'rgba(220,200,180,0.22)'];
+    ctx.fillStyle = colors[Math.random()*colors.length|0];
+    ctx.beginPath();
+    ctx.moveTo(x, y);
+    ctx.lineTo(x + s, y + s * 0.3);
+    ctx.lineTo(x + s * 0.4, y + s);
+    ctx.closePath(); ctx.fill();
+  }
+
+  // Tiny leaf/stick debris
+  for (let i = 0; i < 20; i++) {
+    const x = Math.random() * 1024, y = Math.random() * 1024;
+    const len = 4 + Math.random() * 10;
+    const angle = Math.random() * Math.PI;
+    ctx.strokeStyle = `rgba(${130+Math.random()*40|0},${100+Math.random()*30|0},${60+Math.random()*20|0},${0.12+Math.random()*0.1})`;
+    ctx.lineWidth = 0.5 + Math.random() * 0.8;
+    ctx.beginPath(); ctx.moveTo(x, y);
+    ctx.lineTo(x + Math.cos(angle)*len, y + Math.sin(angle)*len); ctx.stroke();
+  }
+
   // Faint footprint-like dents
-  for (let i = 0; i < 8; i++) {
+  for (let i = 0; i < 10; i++) {
     const x = Math.random() * 900 + 50, y = Math.random() * 900 + 50;
-    ctx.fillStyle = `rgba(190,175,145,${0.05 + Math.random()*0.03})`;
+    ctx.fillStyle = `rgba(185,170,140,${0.04 + Math.random()*0.04})`;
     ctx.beginPath(); ctx.ellipse(x, y, 8+Math.random()*6, 14+Math.random()*8, Math.random()*0.5, 0, Math.PI*2); ctx.fill();
-    ctx.fillStyle = `rgba(190,175,145,${0.04 + Math.random()*0.02})`;
+    ctx.fillStyle = `rgba(185,170,140,${0.03 + Math.random()*0.03})`;
     ctx.beginPath(); ctx.ellipse(x+4, y-18, 5+Math.random()*3, 6+Math.random()*3, Math.random()*0.3, 0, Math.PI*2); ctx.fill();
   }
-  // Subtle sunlit highlight patches
-  for (let i = 0; i < 15; i++) {
+
+  // Dragged/scuff marks
+  for (let i = 0; i < 5; i++) {
+    const x = Math.random() * 800 + 100, y = Math.random() * 800 + 100;
+    const len = 30 + Math.random() * 60;
+    const angle = Math.random() * Math.PI;
+    ctx.strokeStyle = `rgba(190,175,148,${0.05+Math.random()*0.04})`;
+    ctx.lineWidth = 3 + Math.random() * 5;
+    ctx.beginPath(); ctx.moveTo(x, y);
+    ctx.quadraticCurveTo(x+Math.cos(angle)*len*0.5+(Math.random()-0.5)*15, y+Math.sin(angle)*len*0.5,
+      x+Math.cos(angle)*len, y+Math.sin(angle)*len); ctx.stroke();
+  }
+
+  // Sunlit highlight patches
+  for (let i = 0; i < 18; i++) {
     const x = Math.random() * 1024, y = Math.random() * 1024;
-    const r = 30 + Math.random() * 60;
+    const r = 30 + Math.random() * 70;
     const g = ctx.createRadialGradient(x, y, 0, x, y, r);
-    g.addColorStop(0, 'rgba(255,250,235,0.08)');
+    g.addColorStop(0, 'rgba(255,250,235,0.09)');
     g.addColorStop(1, 'rgba(255,250,235,0)');
     ctx.fillStyle = g;
     ctx.fillRect(x-r, y-r, r*2, r*2);
@@ -564,6 +653,19 @@ function createRockTexture() {
     g.addColorStop(1, 'rgba(210,200,185,0)');
     ctx.fillStyle = g; ctx.fillRect(x-r, y-r, r*2, r*2);
   }
+  // Lichen / moss patches
+  for (let i = 0; i < 12; i++) {
+    const x = Math.random()*512, y = Math.random()*512;
+    const r = 8 + Math.random() * 18;
+    const green = 70 + Math.random()*40 | 0;
+    ctx.fillStyle = `rgba(${60+Math.random()*20|0},${green},${40+Math.random()*20|0},${0.06+Math.random()*0.06})`;
+    ctx.beginPath(); ctx.ellipse(x, y, r, r * (0.6+Math.random()*0.5), Math.random()*Math.PI, 0, Math.PI*2); ctx.fill();
+  }
+  // Salt / mineral deposits (white specks)
+  for (let i = 0; i < 800; i++) {
+    ctx.fillStyle = `rgba(255,250,240,${0.02+Math.random()*0.04})`;
+    ctx.fillRect(Math.random()*512, Math.random()*512, 1, 1);
+  }
   return new THREE.CanvasTexture(c);
 }
 
@@ -590,34 +692,67 @@ for (let i = 0; i < sv.count; i++) {
   sv.setY(i, y);
 }
 sandGeo.computeVertexNormals();
-const sandMat = new THREE.MeshStandardMaterial({ map: sandTex, roughness: 0.78, metalness: 0.02, color: 0xF5DEB3 });
-const SAND_COLOR_DEFAULT = 0xF5DEB3;
-const SAND_COLOR_ARCADE = 0xFFF0D0;
+const sandMat = new THREE.MeshStandardMaterial({ map: sandTex, roughness: 0.78, metalness: 0.02, color: 0xF5D050 });
+const SAND_COLOR_DEFAULT = 0xF5D050;
+const SAND_COLOR_ARCADE = 0xF8DC60;
 const sandMesh = new THREE.Mesh(sandGeo, sandMat);
 sandMesh.receiveShadow = true;
 scene.add(sandMesh);
 
 // ===== ENVIRONMENT: WATER =====
-waterGeo = new THREE.PlaneGeometry(350, 220, 60, 60);
+waterGeo = new THREE.PlaneGeometry(400, 280, 80, 80);
 waterGeo.rotateX(-Math.PI / 2);
 const waterMat = new THREE.MeshStandardMaterial({
-  color: 0x20B5C5, transparent: true, opacity: 0.68,
-  roughness: 0.05, metalness: 0.4, side: THREE.DoubleSide
+  color: 0x18A8B8, transparent: true, opacity: 0.72,
+  roughness: 0.04, metalness: 0.45, side: THREE.DoubleSide
 });
 const waterMesh = new THREE.Mesh(waterGeo, waterMat);
-waterMesh.position.set(0, -0.35, -80);
+waterMesh.position.set(0, -0.35, -90);
 waterMesh.receiveShadow = true;
 scene.add(waterMesh);
 
+// Shallow water edge (transparent turquoise near shore)
+const shallowGeo = new THREE.PlaneGeometry(140, 8, 40, 1);
+shallowGeo.rotateX(-Math.PI / 2);
+const shallowMat = new THREE.MeshStandardMaterial({
+  color: 0x60D8D8, transparent: true, opacity: 0.28,
+  roughness: 0.08, metalness: 0.2, side: THREE.DoubleSide
+});
+const shallowMesh = new THREE.Mesh(shallowGeo, shallowMat);
+shallowMesh.position.set(0, -0.18, -17);
+scene.add(shallowMesh);
+
 // Shore foam line
-const foamGeo = new THREE.PlaneGeometry(120, 3, 60, 1);
+const foamGeo = new THREE.PlaneGeometry(130, 3.5, 70, 1);
 foamGeo.rotateX(-Math.PI / 2);
 const foamMat = new THREE.MeshStandardMaterial({
-  color: 0xFFFFFF, transparent: true, opacity: 0.3, roughness: 1, metalness: 0
+  color: 0xFFFFFF, transparent: true, opacity: 0.35, roughness: 1, metalness: 0
 });
 const foamMesh = new THREE.Mesh(foamGeo, foamMat);
-foamMesh.position.set(0, -0.05, -18);
+foamMesh.position.set(0, -0.04, -18);
 scene.add(foamMesh);
+
+// Secondary foam line (gentle inner wash)
+const foam2Geo = new THREE.PlaneGeometry(110, 2, 50, 1);
+foam2Geo.rotateX(-Math.PI / 2);
+const foam2Mat = new THREE.MeshStandardMaterial({
+  color: 0xFFFFF8, transparent: true, opacity: 0.18, roughness: 1, metalness: 0
+});
+const foam2Mesh = new THREE.Mesh(foam2Geo, foam2Mat);
+foam2Mesh.position.set(0, -0.02, -16.5);
+scene.add(foam2Mesh);
+
+// Wet sand strip (darker, shinier band along shoreline)
+const wetSandGeo = new THREE.PlaneGeometry(130, 5, 40, 1);
+wetSandGeo.rotateX(-Math.PI / 2);
+const wetSandMat = new THREE.MeshStandardMaterial({
+  color: 0xC8AA78, roughness: 0.35, metalness: 0.12,
+  transparent: true, opacity: 0.4
+});
+const wetSandMesh = new THREE.Mesh(wetSandGeo, wetSandMat);
+wetSandMesh.position.set(0, 0.01, -15.5);
+wetSandMesh.receiveShadow = true;
+scene.add(wetSandMesh);
 
 // ===== SKY DOME =====
 const skyGeo = new THREE.SphereGeometry(200, 32, 16, 0, Math.PI*2, 0, Math.PI*0.5);
@@ -625,12 +760,14 @@ const skyCanvas = document.createElement('canvas');
 skyCanvas.width = 4; skyCanvas.height = 256;
 const skyCtx = skyCanvas.getContext('2d');
 const skyGrad = skyCtx.createLinearGradient(0, 0, 0, 256);
-skyGrad.addColorStop(0, '#2266BB');
-skyGrad.addColorStop(0.2, '#4A90D9');
-skyGrad.addColorStop(0.45, '#7AB8E8');
-skyGrad.addColorStop(0.7, '#A8D4F0');
-skyGrad.addColorStop(0.88, '#D4E8F5');
-skyGrad.addColorStop(1, '#E8DCC8');
+skyGrad.addColorStop(0, '#1850A0');
+skyGrad.addColorStop(0.12, '#2870C8');
+skyGrad.addColorStop(0.3, '#4A98E0');
+skyGrad.addColorStop(0.5, '#6AB8F0');
+skyGrad.addColorStop(0.7, '#98D0F4');
+skyGrad.addColorStop(0.85, '#C4E4F8');
+skyGrad.addColorStop(0.94, '#E0E8E8');
+skyGrad.addColorStop(1, '#F0E4D0');
 skyCtx.fillStyle = skyGrad; skyCtx.fillRect(0, 0, 4, 256);
 const skyTex = new THREE.CanvasTexture(skyCanvas);
 const skyMat = new THREE.MeshBasicMaterial({ map: skyTex, side: THREE.BackSide, fog: false });
@@ -639,11 +776,18 @@ skyDome.position.y = -2;
 scene.add(skyDome);
 
 // Sun glow
-const sunGlowGeo = new THREE.SphereGeometry(4, 16, 16);
-const sunGlowMat = new THREE.MeshBasicMaterial({ color: 0xFFF8E0, transparent: true, opacity: 0.7, fog: false });
+const sunGlowGeo = new THREE.SphereGeometry(5, 16, 16);
+const sunGlowMat = new THREE.MeshBasicMaterial({ color: 0xFFF4D0, transparent: true, opacity: 0.75, fog: false });
 const sunGlow = new THREE.Mesh(sunGlowGeo, sunGlowMat);
 sunGlow.position.copy(sunLight.position).normalize().multiplyScalar(180);
 scene.add(sunGlow);
+
+// Sun halo (larger soft glow around sun)
+const sunHaloGeo = new THREE.SphereGeometry(12, 16, 16);
+const sunHaloMat = new THREE.MeshBasicMaterial({ color: 0xFFF8E0, transparent: true, opacity: 0.15, fog: false });
+const sunHalo = new THREE.Mesh(sunHaloGeo, sunHaloMat);
+sunHalo.position.copy(sunGlow.position);
+scene.add(sunHalo);
 
 // ===== OBJECT CREATION HELPERS =====
 
@@ -758,17 +902,32 @@ function createPalmTree(x, z, height, leanDir, leanAmt) {
 // -- ROCK --
 function createRock(x, z, scale) {
   scale = scale || 1 + Math.random() * 2;
-  const geo = new THREE.DodecahedronGeometry(scale, 1);
+  // Use a sphere as base — guaranteed watertight, no holes
+  const geo = new THREE.SphereGeometry(scale, 10, 8);
   const verts = geo.attributes.position;
+  // Only push vertices outward/inward along their normal direction to keep mesh convex
   for (let i = 0; i < verts.count; i++) {
-    verts.setX(i, verts.getX(i) + (Math.random()-0.5)*scale*0.25);
-    verts.setY(i, verts.getY(i) * (0.5 + Math.random()*0.3) + (Math.random()-0.5)*scale*0.15);
-    verts.setZ(i, verts.getZ(i) + (Math.random()-0.5)*scale*0.25);
+    const vx = verts.getX(i), vy = verts.getY(i), vz = verts.getZ(i);
+    const len = Math.sqrt(vx*vx + vy*vy + vz*vz);
+    if (len < 0.001) continue;
+    // Radial noise only — keeps mesh watertight
+    const radialNoise = 1.0 + (Math.random() - 0.5) * 0.15;
+    const ySquash = 0.6; // flatten into boulder shape
+    verts.setX(i, vx * radialNoise);
+    verts.setY(i, vy * radialNoise * ySquash);
+    verts.setZ(i, vz * radialNoise);
   }
   geo.computeVertexNormals();
-  const mat = new THREE.MeshStandardMaterial({ map: rockTex, roughness: 0.82, metalness: 0.03, color: 0x9A9080 });
+  // Solid opaque material — like crates but rock-colored
+  const shade = 0.75 + Math.random() * 0.15;
+  const r = Math.floor(0x8A * shade), g = Math.floor(0x82 * shade), b = Math.floor(0x74 * shade);
+  const col = (r << 16) | (g << 8) | b;
+  const mat = new THREE.MeshStandardMaterial({
+    color: col, roughness: 0.85, metalness: 0.02, flatShading: true
+  });
   const m = new THREE.Mesh(geo, mat);
-  m.position.set(x, scale * 0.25, z);
+  const gy = getGroundHeight(x, z);
+  m.position.set(x, gy + scale * 0.28, z);
   m.rotation.y = Math.random() * Math.PI * 2;
   m.castShadow = true;
   m.receiveShadow = true;
@@ -1074,12 +1233,334 @@ createPavilion(28, 26);
 createBeachUmbrella(-15, 12);
 staticColliders.push({ x: -15, z: 12, radius: 0.3 });
 
+// ===== BACKGROUND: CLIFFS, HORIZON, DISTANT SCENERY =====
+(function createBackgroundScenery() {
+  // --- Distant rocky cliff wall behind the ocean ---
+  const cliffMat = new THREE.MeshStandardMaterial({ color: 0x7A7060, roughness: 0.9, metalness: 0.05 });
+  const cliffHighMat = new THREE.MeshStandardMaterial({ color: 0x6A6050, roughness: 0.92, metalness: 0.04 });
+  // Main cliff ridge
+  for (let i = 0; i < 18; i++) {
+    const x = -90 + i * 11 + (Math.random()-0.5)*5;
+    const h = 8 + Math.random() * 14;
+    const w = 6 + Math.random() * 8;
+    const d = 4 + Math.random() * 6;
+    const geo = new THREE.DodecahedronGeometry(1, 1);
+    geo.scale(w, h, d);
+    const mat = Math.random() > 0.5 ? cliffMat : cliffHighMat;
+    const m = new THREE.Mesh(geo, mat);
+    m.position.set(x, h * 0.35, -120 - Math.random() * 20);
+    m.rotation.set(Math.random()*0.3, Math.random()*Math.PI*2, Math.random()*0.2);
+    m.castShadow = false; m.receiveShadow = true;
+    scene.add(m);
+  }
+  // Cliff accent peaks
+  for (let i = 0; i < 10; i++) {
+    const x = -80 + Math.random() * 160;
+    const h = 12 + Math.random() * 8;
+    const geo = new THREE.ConeGeometry(3 + Math.random()*4, h, 5 + Math.floor(Math.random()*3));
+    const m = new THREE.Mesh(geo, cliffHighMat);
+    m.position.set(x, h * 0.4, -130 - Math.random() * 15);
+    m.rotation.y = Math.random() * Math.PI;
+    scene.add(m);
+  }
+
+  // --- Distant palm tree silhouettes on cliffs ---
+  const distPalmTrunkMat = new THREE.MeshStandardMaterial({ color: 0x4A4530, roughness: 0.9 });
+  const distPalmLeafMat = new THREE.MeshStandardMaterial({ color: 0x3A5A30, roughness: 0.85, side: THREE.DoubleSide });
+  for (let i = 0; i < 14; i++) {
+    const x = -75 + Math.random() * 150;
+    const cliffZ = -115 - Math.random() * 20;
+    const baseY = 6 + Math.random() * 10;
+    const th = 3 + Math.random() * 2;
+    const trunk = new THREE.Mesh(new THREE.CylinderGeometry(0.08, 0.12, th, 4), distPalmTrunkMat);
+    trunk.position.set(x, baseY + th/2, cliffZ);
+    trunk.rotation.x = (Math.random()-0.5)*0.2;
+    scene.add(trunk);
+    for (let j = 0; j < 5; j++) {
+      const leaf = new THREE.Mesh(new THREE.PlaneGeometry(1.5 + Math.random(), 0.4), distPalmLeafMat);
+      leaf.position.set(x + (Math.random()-0.5)*0.3, baseY + th + 0.1, cliffZ + (Math.random()-0.5)*0.3);
+      leaf.rotation.set(-0.4 + Math.random()*0.8, j * Math.PI * 2/5, Math.random()*0.4 - 0.2);
+      scene.add(leaf);
+    }
+  }
+
+  // --- Distant small structure (broken dock/pier) ---
+  const dockMat = new THREE.MeshStandardMaterial({ color: 0x6A5540, roughness: 0.9 });
+  const dockX = -35, dockZ = -50;
+  // Posts sticking out of water
+  for (let i = 0; i < 5; i++) {
+    const post = new THREE.Mesh(new THREE.CylinderGeometry(0.12, 0.15, 2.5 + Math.random(), 4), dockMat);
+    post.position.set(dockX + i * 2.5 + (Math.random()-0.5)*0.5, 0.4 + Math.random()*0.5, dockZ + (Math.random()-0.5)*1);
+    post.rotation.set((Math.random()-0.5)*0.15, 0, (Math.random()-0.5)*0.12);
+    post.castShadow = true;
+    scene.add(post);
+  }
+  // Broken plank between some posts
+  const plank = new THREE.Mesh(new THREE.BoxGeometry(5, 0.1, 0.6), new THREE.MeshStandardMaterial({ color: 0x7A6A55, roughness: 0.85 }));
+  plank.position.set(dockX + 3, 1.6, dockZ);
+  plank.rotation.z = -0.06;
+  plank.castShadow = true;
+  scene.add(plank);
+
+  // --- Distant hut silhouette ---
+  const distHutMat = new THREE.MeshStandardMaterial({ color: 0x5A5040, roughness: 0.92 });
+  const distHutX = 50, distHutZ = -90;
+  const hutBody = new THREE.Mesh(new THREE.BoxGeometry(3, 2, 2.5), distHutMat);
+  hutBody.position.set(distHutX, 5, distHutZ);
+  scene.add(hutBody);
+  const hutRoof = new THREE.Mesh(new THREE.ConeGeometry(2.5, 1.5, 4), new THREE.MeshStandardMaterial({ color: 0x5A4530, roughness: 0.9 }));
+  hutRoof.position.set(distHutX, 6.5, distHutZ);
+  hutRoof.rotation.y = Math.PI/4;
+  scene.add(hutRoof);
+
+  // --- Horizon haze band ---
+  const hazeGeo = new THREE.PlaneGeometry(400, 20);
+  const hazeMat = new THREE.MeshBasicMaterial({
+    color: 0xD4E4F0, transparent: true, opacity: 0.4, fog: false, side: THREE.DoubleSide
+  });
+  const hazeMesh = new THREE.Mesh(hazeGeo, hazeMat);
+  hazeMesh.position.set(0, 6, -150);
+  scene.add(hazeMesh);
+
+  // --- Cloud wisps in the distance ---
+  const cloudMat = new THREE.MeshBasicMaterial({ color: 0xFFFFFF, transparent: true, opacity: 0.25, fog: false });
+  for (let i = 0; i < 8; i++) {
+    const cg = new THREE.SphereGeometry(3 + Math.random()*5, 8, 6);
+    cg.scale(2 + Math.random(), 0.4, 1);
+    const cm = new THREE.Mesh(cg, cloudMat);
+    cm.position.set(-80 + Math.random()*160, 25 + Math.random()*15, -100 - Math.random()*60);
+    scene.add(cm);
+  }
+})();
+
+// ===== MID-GROUND BEACH PROPS =====
+(function createMidGroundProps() {
+  // --- Beach grass clumps ---
+  const grassMat = new THREE.MeshStandardMaterial({
+    color: 0x6B8A40, roughness: 0.85, side: THREE.DoubleSide
+  });
+  const grassDarkMat = new THREE.MeshStandardMaterial({
+    color: 0x4A7030, roughness: 0.82, side: THREE.DoubleSide
+  });
+  const grassPositions = [
+    [35, 30], [-32, 35], [25, 40], [-18, 42], [38, 15], [-35, 10],
+    [42, 5], [-40, 25], [30, -8], [-25, -5], [45, 28], [-42, 32],
+    [15, 38], [-10, 45], [50, 18], [-48, 15]
+  ];
+  grassPositions.forEach(([x, z]) => {
+    const count = 5 + Math.floor(Math.random() * 8);
+    for (let i = 0; i < count; i++) {
+      const blade = new THREE.Mesh(
+        new THREE.PlaneGeometry(0.08 + Math.random()*0.05, 0.4 + Math.random()*0.6),
+        Math.random() > 0.4 ? grassMat : grassDarkMat
+      );
+      const gy = getGroundHeight(x + (Math.random()-0.5)*1.5, z + (Math.random()-0.5)*1.5);
+      blade.position.set(
+        x + (Math.random()-0.5)*1.5,
+        gy + 0.15 + Math.random()*0.2,
+        z + (Math.random()-0.5)*1.5
+      );
+      blade.rotation.set(-0.1 + Math.random()*0.3, Math.random()*Math.PI*2, (Math.random()-0.5)*0.4);
+      blade.castShadow = true;
+      scene.add(blade);
+    }
+  });
+
+  // --- Low scrubby bushes ---
+  const bushMat = new THREE.MeshStandardMaterial({ color: 0x3D6B28, roughness: 0.88 });
+  const bushLightMat = new THREE.MeshStandardMaterial({ color: 0x5A8A3A, roughness: 0.85 });
+  const bushPositions = [
+    [38, 32], [-36, 36], [44, 10], [-42, 20], [32, 42],
+    [-30, 40], [48, 22], [-46, 8]
+  ];
+  bushPositions.forEach(([x, z]) => {
+    const gy = getGroundHeight(x, z);
+    const bushGroup = new THREE.Group();
+    const count = 3 + Math.floor(Math.random() * 4);
+    for (let i = 0; i < count; i++) {
+      const r = 0.3 + Math.random() * 0.5;
+      const geo = new THREE.DodecahedronGeometry(r, 1);
+      const m = new THREE.Mesh(geo, Math.random() > 0.5 ? bushMat : bushLightMat);
+      m.position.set((Math.random()-0.5)*0.8, r * 0.6, (Math.random()-0.5)*0.8);
+      m.scale.y = 0.5 + Math.random()*0.3;
+      m.castShadow = true;
+      bushGroup.add(m);
+    }
+    bushGroup.position.set(x, gy, z);
+    scene.add(bushGroup);
+  });
+
+  // --- Seaweed patches near shore ---
+  const seaweedMat = new THREE.MeshStandardMaterial({
+    color: 0x2A5A30, roughness: 0.8, side: THREE.DoubleSide, transparent: true, opacity: 0.85
+  });
+  for (let i = 0; i < 10; i++) {
+    const x = -30 + Math.random() * 60;
+    const z = -17 + Math.random() * 4;
+    const patch = new THREE.Group();
+    const strandCount = 3 + Math.floor(Math.random()*5);
+    for (let s = 0; s < strandCount; s++) {
+      const strand = new THREE.Mesh(
+        new THREE.PlaneGeometry(0.15 + Math.random()*0.1, 0.4 + Math.random()*0.3),
+        seaweedMat
+      );
+      strand.position.set((Math.random()-0.5)*0.5, 0.1, (Math.random()-0.5)*0.5);
+      strand.rotation.set(-0.3, Math.random()*Math.PI, (Math.random()-0.5)*0.5);
+      patch.add(strand);
+    }
+    patch.position.set(x, -0.1, z);
+    scene.add(patch);
+  }
+
+  // --- Old wooden posts / pilings ---
+  const postMat = new THREE.MeshStandardMaterial({ color: 0x6A5A45, roughness: 0.92, metalness: 0.02 });
+  const postPositions = [
+    [-20, -12, 1.2], [22, -14, 0.9], [-35, -8, 1.4], [40, -10, 1.0],
+    [-15, -16, 0.7], [30, -15, 1.1]
+  ];
+  postPositions.forEach(([x, z, h]) => {
+    const gy = getGroundHeight(x, z);
+    const post = new THREE.Mesh(new THREE.CylinderGeometry(0.08, 0.1, h, 5), postMat);
+    post.position.set(x, gy + h/2, z);
+    post.rotation.set((Math.random()-0.5)*0.1, 0, (Math.random()-0.5)*0.08);
+    post.castShadow = true;
+    scene.add(post);
+  });
+
+  // --- Rope fragments between some posts ---
+  const ropeMat = new THREE.MeshStandardMaterial({ color: 0x8A7A60, roughness: 0.95 });
+  const ropePoints = [
+    { start: [-20, 0.6, -12], end: [-15, 0.3, -16], sag: 0.3 },
+  ];
+  ropePoints.forEach(rp => {
+    const curve = new THREE.QuadraticBezierCurve3(
+      new THREE.Vector3(rp.start[0], getGroundHeight(rp.start[0], rp.start[2]) + rp.start[1], rp.start[2]),
+      new THREE.Vector3((rp.start[0]+rp.end[0])/2, getGroundHeight((rp.start[0]+rp.end[0])/2, (rp.start[2]+rp.end[2])/2 ) + (rp.start[1]+rp.end[1])/2 - rp.sag, (rp.start[2]+rp.end[2])/2),
+      new THREE.Vector3(rp.end[0], getGroundHeight(rp.end[0], rp.end[2]) + rp.end[1], rp.end[2])
+    );
+    const tubeGeo = new THREE.TubeGeometry(curve, 12, 0.02, 4, false);
+    const rope = new THREE.Mesh(tubeGeo, ropeMat);
+    rope.castShadow = true;
+    scene.add(rope);
+  });
+
+  // --- Small sand mounds ---
+  const moundMat = new THREE.MeshStandardMaterial({ map: sandTex, color: 0xE8C860, roughness: 0.85 });
+  const moundPositions = [
+    [10, -10, 1.2], [-12, -8, 0.8], [18, 5, 1.0], [-8, 20, 0.9],
+    [24, -12, 1.3], [-20, 15, 0.7], [5, 30, 1.1]
+  ];
+  moundPositions.forEach(([x, z, s]) => {
+    const gy = getGroundHeight(x, z);
+    const mound = new THREE.Mesh(new THREE.SphereGeometry(s, 8, 6), moundMat);
+    mound.position.set(x, gy - 0.1, z);
+    mound.scale.y = 0.25;
+    mound.receiveShadow = true;
+    scene.add(mound);
+  });
+
+  // --- Extra driftwood piles ---
+  for (let i = 0; i < 4; i++) {
+    const pileX = -30 + Math.random() * 60, pileZ = -14 + Math.random() * 12;
+    const gy = getGroundHeight(pileX, pileZ);
+    const pile = new THREE.Group();
+    const stickCount = 3 + Math.floor(Math.random() * 4);
+    const stickMat = new THREE.MeshStandardMaterial({ color: 0xA08A6A, roughness: 0.9 });
+    for (let s = 0; s < stickCount; s++) {
+      const len = 0.4 + Math.random() * 0.8;
+      const stick = new THREE.Mesh(new THREE.CylinderGeometry(0.02, 0.03, len, 4), stickMat);
+      stick.position.set((Math.random()-0.5)*0.5, 0.05, (Math.random()-0.5)*0.5);
+      stick.rotation.set(Math.PI/2 * 0.8 + (Math.random()-0.5)*0.6, 0, Math.random()*Math.PI);
+      stick.castShadow = true;
+      pile.add(stick);
+    }
+    pile.position.set(pileX, gy, pileZ);
+    scene.add(pile);
+  }
+
+  // --- Hammock between two nearby palms (decorative) ---
+  if (palmPositions.length >= 2) {
+    const p1 = palmPositions[0], p2 = palmPositions[1];
+    const hx1 = p1[0], hz1 = p1[1], hx2 = p2[0], hz2 = p2[1];
+    const dist = Math.sqrt((hx2-hx1)*(hx2-hx1)+(hz2-hz1)*(hz2-hz1));
+    if (dist < 20 && dist > 4) {
+      const hy = 2.0;
+      const hammockMat = new THREE.MeshStandardMaterial({
+        color: 0xE8D0A0, roughness: 0.9, side: THREE.DoubleSide, transparent: true, opacity: 0.8
+      });
+      const curve = new THREE.QuadraticBezierCurve3(
+        new THREE.Vector3(hx1, getGroundHeight(hx1, hz1) + hy, hz1),
+        new THREE.Vector3((hx1+hx2)/2, getGroundHeight((hx1+hx2)/2, (hz1+hz2)/2) + hy - 1.0, (hz1+hz2)/2),
+        new THREE.Vector3(hx2, getGroundHeight(hx2, hz2) + hy, hz2)
+      );
+      const hammockGeo = new THREE.TubeGeometry(curve, 16, 0.3, 6, false);
+      const hammock = new THREE.Mesh(hammockGeo, hammockMat);
+      hammock.castShadow = true;
+      scene.add(hammock);
+    }
+  }
+
+  // --- Small pebble scatter across the beach ---
+  const pebbleMat = new THREE.MeshStandardMaterial({ color: 0x9A8A78, roughness: 0.85 });
+  const pebbleLightMat = new THREE.MeshStandardMaterial({ color: 0xB8A894, roughness: 0.8 });
+  const pebbleDarkMat = new THREE.MeshStandardMaterial({ color: 0x7A6A58, roughness: 0.9 });
+  for (let i = 0; i < 60; i++) {
+    const x = (Math.random()-0.5) * 80, z = -16 + Math.random() * 55;
+    const gy = getGroundHeight(x, z);
+    const s = 0.04 + Math.random() * 0.08;
+    const pebble = new THREE.Mesh(
+      new THREE.DodecahedronGeometry(s, 0),
+      [pebbleMat, pebbleLightMat, pebbleDarkMat][Math.floor(Math.random()*3)]
+    );
+    pebble.position.set(x, gy + s*0.3, z);
+    pebble.scale.y = 0.4 + Math.random()*0.3;
+    pebble.rotation.set(Math.random(), Math.random(), Math.random());
+    scene.add(pebble);
+  }
+
+  // --- Tide pool (small reflective puddle) ---
+  const tidePoolMat = new THREE.MeshStandardMaterial({
+    color: 0x3A9AB0, roughness: 0.02, metalness: 0.6,
+    transparent: true, opacity: 0.5
+  });
+  const poolPositions = [[-8, -14], [12, -15], [-18, -13]];
+  poolPositions.forEach(([x, z]) => {
+    const gy = getGroundHeight(x, z);
+    const pool = new THREE.Mesh(
+      new THREE.CircleGeometry(0.4 + Math.random()*0.6, 8),
+      tidePoolMat
+    );
+    pool.rotation.x = -Math.PI/2;
+    pool.position.set(x, gy + 0.02, z);
+    scene.add(pool);
+  });
+
+  // --- Scattered leaf debris on ground ---
+  const leafDebrisMat = new THREE.MeshStandardMaterial({
+    color: 0x6A8A40, roughness: 0.85, side: THREE.DoubleSide, transparent: true, opacity: 0.7
+  });
+  const dryLeafMat = new THREE.MeshStandardMaterial({
+    color: 0x9A8A40, roughness: 0.9, side: THREE.DoubleSide, transparent: true, opacity: 0.65
+  });
+  for (let i = 0; i < 30; i++) {
+    const x = (Math.random()-0.5) * 60, z = -10 + Math.random() * 50;
+    const gy = getGroundHeight(x, z);
+    const leaf = new THREE.Mesh(
+      new THREE.PlaneGeometry(0.2 + Math.random()*0.3, 0.08 + Math.random()*0.05),
+      Math.random() > 0.5 ? leafDebrisMat : dryLeafMat
+    );
+    leaf.position.set(x, gy + 0.01, z);
+    leaf.rotation.set(-Math.PI/2 + (Math.random()-0.5)*0.15, Math.random()*Math.PI*2, 0);
+    scene.add(leaf);
+  }
+})();
+
 // ===== PARKOUR COURSE: "The Coconut Gauntlet" =====
 // Near spawn (0,5), running roughly from z=10 down to z=-15
 const courseDriftwoodMat = new THREE.MeshStandardMaterial({ color: 0xB0956E, roughness: 0.88, metalness: 0 });
 const coursePlankMat = new THREE.MeshStandardMaterial({ color: 0xC4A87A, roughness: 0.82, metalness: 0 });
 const courseRockMat = new THREE.MeshStandardMaterial({ map: rockTex, color: 0xA89880, roughness: 0.78, metalness: 0.03 });
-const courseSandMoundMat = new THREE.MeshStandardMaterial({ map: sandTex, color: 0xF0DFC0, roughness: 0.85 });
+const courseSandMoundMat = new THREE.MeshStandardMaterial({ map: sandTex, color: 0xF0D070, roughness: 0.85 });
 const courseBarrelMat = new THREE.MeshStandardMaterial({ color: 0x8B7355, roughness: 0.75 });
 const courseCrateMat = new THREE.MeshStandardMaterial({ color: 0xC4A060, roughness: 0.82 });
 
@@ -1114,7 +1595,7 @@ const courseCrateMat = new THREE.MeshStandardMaterial({ color: 0xC4A060, roughne
   );
   signFace.position.set(0, 1.35, 0.035);
   group.add(signFace);
-  group.position.set(4, 0, 10);
+  group.position.set(10, 0, 10);
   group.rotation.y = -0.3;
   scene.add(group);
 })();
@@ -1122,13 +1603,13 @@ const courseCrateMat = new THREE.MeshStandardMaterial({ color: 0xC4A060, roughne
 // === SECTION 1: Driftwood Log Run ===
 (function createDriftwoodRun() {
   const logPositions = [
-    { x: 5, z: 8, len: 1.4, r: 0.15, rotY: 0.15, rotZ: 0.05, tilt: 0.08 },
-    { x: 6.2, z: 6.5, len: 1.2, r: 0.13, rotY: -0.1, rotZ: 0.1, tilt: -0.05 },
-    { x: 5.5, z: 5, len: 1.6, r: 0.16, rotY: 0.25, rotZ: -0.04, tilt: 0.1 },
-    { x: 6.8, z: 3.5, len: 1.3, r: 0.14, rotY: -0.2, rotZ: 0.08, tilt: -0.06 },
-    { x: 5.8, z: 2, len: 1.5, r: 0.15, rotY: 0.05, rotZ: -0.06, tilt: 0.04 },
-    { x: 7, z: 0.5, len: 1.1, r: 0.12, rotY: 0.3, rotZ: 0.03, tilt: 0.12 },
-    { x: 5.5, z: -1, len: 1.4, r: 0.14, rotY: -0.15, rotZ: 0.06, tilt: -0.03 },
+    { x: 11, z: 8, len: 1.4, r: 0.15, rotY: 0.15, rotZ: 0.05, tilt: 0.08 },
+    { x: 12.2, z: 6.5, len: 1.2, r: 0.13, rotY: -0.1, rotZ: 0.1, tilt: -0.05 },
+    { x: 11.5, z: 5, len: 1.6, r: 0.16, rotY: 0.25, rotZ: -0.04, tilt: 0.1 },
+    { x: 12.8, z: 3.5, len: 1.3, r: 0.14, rotY: -0.2, rotZ: 0.08, tilt: -0.06 },
+    { x: 11.8, z: 2, len: 1.5, r: 0.15, rotY: 0.05, rotZ: -0.06, tilt: 0.04 },
+    { x: 13, z: 0.5, len: 1.1, r: 0.12, rotY: 0.3, rotZ: 0.03, tilt: 0.12 },
+    { x: 11.5, z: -1, len: 1.4, r: 0.14, rotY: -0.15, rotZ: 0.06, tilt: -0.03 },
   ];
   logPositions.forEach(lp => {
     const gy = getGroundHeight(lp.x, lp.z);
@@ -1149,20 +1630,20 @@ const courseCrateMat = new THREE.MeshStandardMaterial({ color: 0xC4A060, roughne
 })();
 
 // Decorative coconuts along the course
-createGroundCoconut(4, 9);
-createGroundCoconut(7.5, 4);
-createGroundCoconut(4.5, -0.5);
+createGroundCoconut(10, 9);
+createGroundCoconut(13.5, 4);
+createGroundCoconut(10.5, -0.5);
 
 // === SECTION 2: Stepping Stones in Shallow Water ===
 (function createSteppingStones() {
   const stones = [
-    { x: 6.5, z: -2.5, r: 0.7, h: 0.35, flat: 0.4 },
-    { x: 7.8, z: -4, r: 0.6, h: 0.3, flat: 0.45 },
-    { x: 6.8, z: -5.5, r: 0.75, h: 0.32, flat: 0.38 },
-    { x: 8.2, z: -7, r: 0.55, h: 0.28, flat: 0.5 },
-    { x: 7, z: -8.5, r: 0.65, h: 0.33, flat: 0.42 },
-    { x: 8.5, z: -10, r: 0.7, h: 0.35, flat: 0.4 },
-    { x: 7.2, z: -11.5, r: 0.6, h: 0.3, flat: 0.45 },
+    { x: 12.5, z: -2.5, r: 0.7, h: 0.35, flat: 0.4 },
+    { x: 13.8, z: -4, r: 0.6, h: 0.3, flat: 0.45 },
+    { x: 12.8, z: -5.5, r: 0.75, h: 0.32, flat: 0.38 },
+    { x: 14.2, z: -7, r: 0.55, h: 0.28, flat: 0.5 },
+    { x: 13, z: -8.5, r: 0.65, h: 0.33, flat: 0.42 },
+    { x: 14.5, z: -10, r: 0.7, h: 0.35, flat: 0.4 },
+    { x: 13.2, z: -11.5, r: 0.6, h: 0.3, flat: 0.45 },
   ];
   stones.forEach(s => {
     const gy = getGroundHeight(s.x, s.z);
@@ -1184,7 +1665,7 @@ createGroundCoconut(4.5, -0.5);
       hw: s.r * 0.75, hh: s.h * 0.3, hd: s.r * 0.75
     });
   });
-  [{ x:7, z:-3.2 }, { x:7.5, z:-6.2 }, { x:7.8, z:-9.2 }].forEach(p => {
+  [{ x:13, z:-3.2 }, { x:13.5, z:-6.2 }, { x:13.8, z:-9.2 }].forEach(p => {
     const puddle = new THREE.Mesh(
       new THREE.CircleGeometry(1.2, 12),
       new THREE.MeshStandardMaterial({ color: 0x40B8C8, transparent: true, opacity: 0.35, roughness: 0.1, metalness: 0.3 })
@@ -1198,10 +1679,10 @@ createGroundCoconut(4.5, -0.5);
 // === SECTION 3: Sand Mound Ramps ===
 (function createSandMounds() {
   const mounds = [
-    { x: 8, z: -13, w: 3, h: 0.8, d: 2.5 },
-    { x: 10, z: -15, w: 2.5, h: 1.1, d: 2 },
-    { x: 8.5, z: -17, w: 3.5, h: 0.6, d: 3 },
-    { x: 10.5, z: -19, w: 2, h: 1.4, d: 2 },
+    { x: 14, z: -13, w: 3, h: 0.8, d: 2.5 },
+    { x: 16, z: -15, w: 2.5, h: 1.1, d: 2 },
+    { x: 14.5, z: -17, w: 3.5, h: 0.6, d: 3 },
+    { x: 16.5, z: -19, w: 2, h: 1.4, d: 2 },
   ];
   mounds.forEach(m => {
     const gy = getGroundHeight(m.x, m.z);
@@ -1229,9 +1710,9 @@ createGroundCoconut(4.5, -0.5);
 (function createBeachPropSection() {
   // Stacked crates
   const cratePositions = [
-    { x: 9, z: -21,  w: 0.8, h: 0.8, d: 0.8, stack: 0 },
-    { x: 10, z: -21.2, w: 0.7, h: 0.7, d: 0.7, stack: 0 },
-    { x: 9.5, z: -21.1, w: 0.65, h: 0.65, d: 0.65, stack: 0.8 },
+    { x: 15, z: -21,  w: 0.8, h: 0.8, d: 0.8, stack: 0 },
+    { x: 16, z: -21.2, w: 0.7, h: 0.7, d: 0.7, stack: 0 },
+    { x: 15.5, z: -21.1, w: 0.65, h: 0.65, d: 0.65, stack: 0.8 },
   ];
   cratePositions.forEach(cr => {
     const gy = getGroundHeight(cr.x, cr.z);
@@ -1258,7 +1739,7 @@ createGroundCoconut(4.5, -0.5);
   });
 
   // Old barrels
-  [{ x: 11, z: -22, r: 0.3, h: 0.9 }, { x: 11.5, z: -20.5, r: 0.28, h: 0.85 }].forEach(b => {
+  [{ x: 17, z: -22, r: 0.3, h: 0.9 }, { x: 17.5, z: -20.5, r: 0.28, h: 0.85 }].forEach(b => {
     const gy = getGroundHeight(b.x, b.z);
     const barrel = new THREE.Mesh(
       new THREE.CylinderGeometry(b.r, b.r * 0.95, b.h, 10),
@@ -1284,7 +1765,7 @@ createGroundCoconut(4.5, -0.5);
   });
 
   // Broken dock platform
-  const dockX = 10, dockZ = -24;
+  const dockX = 16, dockZ = -24;
   const dockGy = getGroundHeight(dockX, dockZ);
   const dockGroup = new THREE.Group();
   [[-1.2, -0.8], [1.2, -0.8], [-1.2, 0.8], [1.2, 0.8]].forEach(([px, pz]) => {
@@ -1317,12 +1798,12 @@ createGroundCoconut(4.5, -0.5);
 })();
 
 // Scattered decorative coconuts around props section
-createGroundCoconut(12, -20);
-createGroundCoconut(8.5, -23);
+createGroundCoconut(18, -20);
+createGroundCoconut(14.5, -23);
 
 // === SECTION 5: Palm-Root Spiral (set piece) ===
 (function createPalmSpiral() {
-  const cx = 11, cz = -27;
+  const cx = 17, cz = -27;
   const gy = getGroundHeight(cx, cz);
   createPalmTree(cx, cz, 9, Math.PI * 0.7, 0.08);
   staticColliders.push({ x: cx, z: cz, radius: 0.5 });
@@ -1396,9 +1877,9 @@ createGroundCoconut(8.5, -23);
 // === SECTION 6: Cliffside Ledges & Bridge ===
 (function createCliffsideBridge() {
   const ledges = [
-    { x: 11, z: -30, w: 1.8, h: 0.6, d: 1.5 },
-    { x: 12.5, z: -30.5, w: 1.5, h: 1.0, d: 1.2 },
-    { x: 14, z: -30, w: 1.6, h: 1.5, d: 1.4 },
+    { x: 17, z: -30, w: 1.8, h: 0.6, d: 1.5 },
+    { x: 18.5, z: -30.5, w: 1.5, h: 1.0, d: 1.2 },
+    { x: 20, z: -30, w: 1.6, h: 1.5, d: 1.4 },
   ];
   ledges.forEach(l => {
     const gy = getGroundHeight(l.x, l.z);
@@ -1421,8 +1902,8 @@ createGroundCoconut(8.5, -23);
     });
   });
 
-  const bridgeStartX = 14, bridgeStartZ = -30;
-  const bridgeEndX = 17, bridgeEndZ = -29;
+  const bridgeStartX = 20, bridgeStartZ = -30;
+  const bridgeEndX = 23, bridgeEndZ = -29;
   const bridgeH = getGroundHeight(bridgeStartX, bridgeStartZ) + 1.5;
   const bridgeLen = Math.sqrt((bridgeEndX-bridgeStartX)**2 + (bridgeEndZ-bridgeStartZ)**2);
   const bridgeAngle = Math.atan2(bridgeEndZ-bridgeStartZ, bridgeEndX-bridgeStartX);
@@ -1479,7 +1960,7 @@ createGroundCoconut(8.5, -23);
 
 // === SECTION 7: Finish Pedestal ===
 (function createFinishPedestal() {
-  const px = 18, pz = -28.5;
+  const px = 24, pz = -28.5;
   const gy = getGroundHeight(px, pz);
   const group = new THREE.Group();
 
@@ -1557,11 +2038,370 @@ createGroundCoconut(8.5, -23);
 })();
 
 // Course decorative elements
-createShell(5.5, 7);
-createShell(8, -4);
-createShell(12, -22);
-createStarfish(7, -1);
-createStarfish(10, -19);
+createShell(11.5, 7);
+createShell(14, -4);
+createShell(18, -22);
+createStarfish(13, -1);
+createStarfish(16, -19);
+
+// ===== COCONUT VENDOR HUT: "Leon's Coconut Shop" =====
+(function createCoconutVendorHut() {
+  const HX = -7, HZ = 10;
+  const gy = getGroundHeight(HX, HZ);
+  const hutAngle = 0.3;
+  const cosA = Math.cos(hutAngle), sinA = Math.sin(hutAngle);
+
+  // Transform local hut coordinates to world
+  function toWorld(lx, ly, lz) {
+    return {
+      x: HX + lx * cosA - lz * sinA,
+      y: gy + ly,
+      z: HZ + lx * sinA + lz * cosA
+    };
+  }
+
+  // Helper to add a mesh at local hut position
+  function addMesh(geo, mat, lx, ly, lz, opts = {}) {
+    const mesh = new THREE.Mesh(geo, mat);
+    const wp = toWorld(lx, ly, lz);
+    mesh.position.set(wp.x, wp.y, wp.z);
+    mesh.rotation.y = hutAngle + (opts.rotY || 0);
+    if (opts.rotX) mesh.rotation.x = opts.rotX;
+    if (opts.rotZ) mesh.rotation.z = opts.rotZ;
+    mesh.castShadow = opts.castShadow !== false;
+    mesh.receiveShadow = !!opts.receiveShadow;
+    scene.add(mesh);
+    return mesh;
+  }
+
+  // Helper to add a knockable object
+  function addKnockable(geo, mat, lx, ly, lz, radius, opts = {}) {
+    const mesh = addMesh(geo, mat, lx, ly, lz, opts);
+    knockableObjects.push({ mesh, vx: 0, vy: 0, vz: 0, radius, settled: true });
+    return mesh;
+  }
+
+  // --- Materials ---
+  const bleachedWoodMat = new THREE.MeshStandardMaterial({ color: 0xC8B898, roughness: 0.92, metalness: 0 });
+  const darkWoodMat = new THREE.MeshStandardMaterial({ color: 0x8A7050, roughness: 0.88, metalness: 0 });
+  const thatchMat = new THREE.MeshStandardMaterial({ color: 0xB8A060, roughness: 0.95, metalness: 0, side: THREE.DoubleSide });
+  const ropeMat = new THREE.MeshStandardMaterial({ color: 0xC4A870, roughness: 0.95, metalness: 0 });
+  const coconutShellMat = new THREE.MeshStandardMaterial({ map: coconutTex, color: 0x7A4422, roughness: 0.7 });
+
+  // === 4 CORNER POSTS ===
+  const postPositions = [[-1.3, -1], [1.3, -1], [-1.3, 1], [1.3, 1]];
+  postPositions.forEach(([px, pz]) => {
+    addMesh(
+      new THREE.CylinderGeometry(0.07, 0.09, 2.4, 6),
+      bleachedWoodMat.clone(), px, 1.2, pz
+    );
+    // Rope wrapping
+    const rw = toWorld(px, 2.1, pz);
+    const rope = new THREE.Mesh(new THREE.TorusGeometry(0.09, 0.015, 4, 8), ropeMat);
+    rope.position.set(rw.x, rw.y, rw.z);
+    rope.rotation.x = Math.PI / 2;
+    scene.add(rope);
+    // Post colliders
+    const wp = toWorld(px, 0, pz);
+    staticColliders.push({ x: wp.x, z: wp.z, radius: 0.12 });
+  });
+
+  // === COUNTER (front-facing, solid surface to jump on) ===
+  addMesh(new THREE.BoxGeometry(2.8, 0.1, 0.8), bleachedWoodMat, 0, 1.0, -1.0, { receiveShadow: true });
+  // Counter front panel
+  addMesh(new THREE.BoxGeometry(2.8, 1.0, 0.06), bleachedWoodMat.clone(), 0, 0.5, -1.35);
+  // Counter side panels
+  [-1.35, 1.35].forEach(sx => {
+    addMesh(new THREE.BoxGeometry(0.06, 1.0, 0.8), bleachedWoodMat.clone(), sx, 0.5, -1.0);
+  });
+  // Counter platform collider
+  const cwp = toWorld(0, 1.0, -1.0);
+  platformColliders.push({ x: cwp.x, y: cwp.y, z: cwp.z, hw: 1.4, hh: 0.08, hd: 0.4 });
+
+  // === STEP BOX behind counter (so player can jump onto counter) ===
+  addMesh(new THREE.BoxGeometry(1.0, 0.45, 0.5), bleachedWoodMat.clone(), 0, 0.225, -0.45, { receiveShadow: true });
+  const stepWP = toWorld(0, 0.225, -0.45);
+  platformColliders.push({ x: stepWP.x, y: stepWP.y, z: stepWP.z, hw: 0.5, hh: 0.225, hd: 0.25 });
+
+  // === THATCH ROOF ===
+  const roofW = 3.4;
+  [-1, 1].forEach(side => {
+    const mat = thatchMat.clone();
+    mat.color.set(new THREE.Color(0xB8A060).lerp(new THREE.Color(0xA89040), Math.random() * 0.3));
+    const rp = toWorld(0, 2.68, side * 0.55);
+    const roof = new THREE.Mesh(new THREE.PlaneGeometry(roofW, 1.6), mat);
+    roof.position.set(rp.x, rp.y, rp.z);
+    roof.rotation.y = hutAngle;
+    roof.rotation.x = side * 0.45;
+    roof.castShadow = true; roof.receiveShadow = true;
+    scene.add(roof);
+  });
+  // Ridge beam
+  const ridgeP = toWorld(0, 2.88, 0);
+  const ridge = new THREE.Mesh(new THREE.CylinderGeometry(0.04, 0.04, roofW + 0.2, 5), darkWoodMat);
+  ridge.position.set(ridgeP.x, ridgeP.y, ridgeP.z);
+  ridge.rotation.z = Math.PI / 2;
+  ridge.rotation.y = hutAngle;
+  ridge.castShadow = true;
+  scene.add(ridge);
+
+  // Hanging straw fringe
+  for (let i = 0; i < 16; i++) {
+    const mat = thatchMat.clone();
+    mat.color.set(new THREE.Color(0xC8A850).lerp(new THREE.Color(0x9A8030), Math.random()));
+    const lx = -1.65 + Math.random() * 3.3;
+    const lz = (Math.random() > 0.5 ? 1 : -1) * (1.0 + Math.random() * 0.3);
+    addMesh(new THREE.BoxGeometry(0.025, 0.18 + Math.random() * 0.2, 0.015), mat, lx, 2.3 + Math.random() * 0.12, lz,
+      { rotZ: (Math.random()-0.5) * 0.35 });
+  }
+
+  // === HANGING SIGN: "LEON'S COCONUT SHOP" ===
+  // Rope (visual only, no collision)
+  addMesh(new THREE.CylinderGeometry(0.012, 0.012, 0.5, 4), ropeMat, 0, 2.42, -1.55);
+  // Sign board (visual only)
+  addMesh(new THREE.BoxGeometry(1.4, 0.45, 0.06), darkWoodMat, 0, 2.12, -1.55, { rotZ: 0.03 });
+  // Sign face texture
+  const signCanvas = document.createElement('canvas');
+  signCanvas.width = 256; signCanvas.height = 80;
+  const sctx = signCanvas.getContext('2d');
+  sctx.fillStyle = '#C8A870'; sctx.fillRect(0, 0, 256, 80);
+  for (let i = 0; i < 300; i++) {
+    sctx.fillStyle = `rgba(60,40,20,${Math.random()*0.06})`;
+    sctx.fillRect(Math.random()*256, 0, 1, 80);
+  }
+  sctx.fillStyle = '#1A1008'; sctx.font = 'bold 22px Georgia'; sctx.textAlign = 'center';
+  sctx.fillText("LEON'S COCONUT SHOP", 128, 32);
+  sctx.font = 'italic 12px Georgia'; sctx.fillStyle = '#2A1A0A';
+  sctx.fillText('Est. Since Forever', 128, 56);
+  for (let i = 0; i < 150; i++) {
+    sctx.fillStyle = `rgba(100,80,50,${Math.random()*0.08})`;
+    sctx.fillRect(Math.random()*256, Math.random()*80, 3, 3);
+  }
+  const signTexture = new THREE.CanvasTexture(signCanvas);
+  const sfp = toWorld(0, 2.12, -1.58);
+  const signFace = new THREE.Mesh(
+    new THREE.PlaneGeometry(1.3, 0.42),
+    new THREE.MeshStandardMaterial({ map: signTexture, roughness: 0.85 })
+  );
+  signFace.position.set(sfp.x, sfp.y, sfp.z);
+  signFace.rotation.y = hutAngle;
+  signFace.rotation.z = 0.03;
+  scene.add(signFace);
+  // Back face of sign
+  const sfpBack = toWorld(0, 2.12, -1.52);
+  const signFaceBack = new THREE.Mesh(
+    new THREE.PlaneGeometry(1.3, 0.42),
+    new THREE.MeshStandardMaterial({ map: signTexture, roughness: 0.85 })
+  );
+  signFaceBack.position.set(sfpBack.x, sfpBack.y, sfpBack.z);
+  signFaceBack.rotation.y = hutAngle + Math.PI;
+  signFaceBack.rotation.z = -0.03;
+  scene.add(signFaceBack);
+
+  // === MENU BOARD ===
+  const menuCanvas = document.createElement('canvas');
+  menuCanvas.width = 200; menuCanvas.height = 280;
+  const mctx = menuCanvas.getContext('2d');
+  mctx.fillStyle = '#2A3A2A'; mctx.fillRect(0, 0, 200, 280);
+  for (let i = 0; i < 400; i++) {
+    mctx.fillStyle = `rgba(200,200,180,${Math.random()*0.04})`;
+    mctx.fillRect(Math.random()*200, Math.random()*280, 2, 2);
+  }
+  mctx.strokeStyle = '#C8B898'; mctx.lineWidth = 4;
+  mctx.strokeRect(6, 6, 188, 268);
+  mctx.fillStyle = '#F5E8C0'; mctx.font = 'bold 18px Georgia'; mctx.textAlign = 'center';
+  mctx.fillText('~ MENU ~', 100, 36);
+  mctx.font = '13px Georgia'; mctx.textAlign = 'left';
+  [['Fresh Coconut Water','3'],['Premium Coconut','5'],['Deluxe Coconut','8'],['Mystery Coconut','?'],['Coconut for Coconuts','free']].forEach(([item, price], i) => {
+    const y = 70 + i * 36;
+    mctx.fillStyle = '#E8D8B0'; mctx.fillText(item, 16, y);
+    mctx.textAlign = 'right'; mctx.fillStyle = '#C8B890'; mctx.fillText(price, 184, y); mctx.textAlign = 'left';
+    mctx.strokeStyle = 'rgba(200,190,160,0.2)'; mctx.setLineDash([2,4]);
+    mctx.beginPath(); mctx.moveTo(16, y+6); mctx.lineTo(184, y+6); mctx.stroke(); mctx.setLineDash([]);
+  });
+  mctx.fillStyle = '#98A888'; mctx.font = 'italic 10px Georgia'; mctx.textAlign = 'center';
+  mctx.fillText('No refunds. You know why.', 100, 258);
+  const menuTexture = new THREE.CanvasTexture(menuCanvas);
+  const mbp = toWorld(-0.5, 1.4, 0.96);
+  const menuBoard = new THREE.Mesh(
+    new THREE.PlaneGeometry(0.7, 1.0),
+    new THREE.MeshStandardMaterial({ map: menuTexture, roughness: 0.9 })
+  );
+  menuBoard.position.set(mbp.x, mbp.y, mbp.z);
+  menuBoard.rotation.y = hutAngle + Math.PI;
+  scene.add(menuBoard);
+
+  // === COUNTER ITEMS (knockable!) ===
+
+  // Cut-open coconut halves with straws
+  [[-0.6, -0.9], [0.2, -0.95], [0.7, -0.88]].forEach(([cx, cz], i) => {
+    const halfGeo = new THREE.SphereGeometry(0.12, 8, 6, 0, Math.PI * 2, 0, Math.PI * 0.5);
+    addKnockable(halfGeo, coconutShellMat.clone(), cx, 1.14, cz, 0.12, { rotX: Math.PI });
+    // Straw
+    if (i < 2) {
+      addKnockable(
+        new THREE.CylinderGeometry(0.015, 0.015, 0.4, 4),
+        new THREE.MeshStandardMaterial({ color: i === 0 ? 0xE85050 : 0x50A0E8, roughness: 0.5 }),
+        cx + 0.03, 1.3, cz + 0.02, 0.02, { rotZ: 0.2, rotX: 0.1 }
+      );
+    }
+  });
+
+  // Glass bottles (knockable)
+  [[-1.0, -0.8], [-0.85, -0.73]].forEach(([bx, bz]) => {
+    const bottleMat = new THREE.MeshStandardMaterial({
+      color: 0x88B888, roughness: 0.15, metalness: 0.1, transparent: true, opacity: 0.7
+    });
+    addKnockable(new THREE.CylinderGeometry(0.035, 0.04, 0.22, 6), bottleMat, bx, 1.17, bz, 0.04);
+  });
+
+  // Seashells on counter (knockable)
+  [[0.9, -1.1], [-0.3, -1.15], [0.5, -1.12]].forEach(([sx, sz]) => {
+    addKnockable(
+      new THREE.SphereGeometry(0.04, 5, 4, 0, Math.PI),
+      new THREE.MeshStandardMaterial({ color: 0xFFF0E0, roughness: 0.7 }),
+      sx, 1.07, sz, 0.04, { rotX: Math.PI/2, rotZ: Math.random() * Math.PI }
+    );
+  });
+
+  // Wooden cup (knockable)
+  addKnockable(
+    new THREE.CylinderGeometry(0.05, 0.04, 0.1, 6, 1, true),
+    new THREE.MeshStandardMaterial({ color: 0xD8C8A0, roughness: 0.8, side: THREE.DoubleSide }),
+    -0.1, 1.1, -1.1, 0.05
+  );
+
+  // Machete (knockable)
+  addKnockable(
+    new THREE.BoxGeometry(0.04, 0.012, 0.35),
+    new THREE.MeshStandardMaterial({ color: 0xC0C0C0, roughness: 0.3, metalness: 0.6 }),
+    1.0, 1.065, -0.85, 0.06, { rotY: 0.4 }
+  );
+
+  // === COCONUT DISPLAYS ===
+
+  // Neat pyramid pile (right, knockable coconuts)
+  [[0, 0], [0.24, 0], [-0.12, 0.18], [0.12, 0.18], [0.06, 0.09]].forEach(([ox, oz]) => {
+    const oy = (ox === 0.06 && oz === 0.09) ? 0.34 : 0.12;
+    addKnockable(
+      new THREE.SphereGeometry(0.12, 8, 8), coconutShellMat.clone(),
+      1.7 + ox, oy, oz, 0.12
+    );
+  });
+
+  // Woven basket (static)
+  addMesh(
+    new THREE.CylinderGeometry(0.35, 0.28, 0.4, 10, 1, true),
+    new THREE.MeshStandardMaterial({ color: 0xC4A060, roughness: 0.95, side: THREE.DoubleSide }),
+    -1.6, 0.2, 0.3
+  );
+  [0.05, 0.2, 0.35].forEach(ry => {
+    const rp = toWorld(-1.6, ry, 0.3);
+    const ring = new THREE.Mesh(
+      new THREE.TorusGeometry(0.32, 0.012, 4, 10),
+      new THREE.MeshStandardMaterial({ color: 0xA08040, roughness: 0.9 })
+    );
+    ring.position.set(rp.x, rp.y, rp.z);
+    ring.rotation.x = Math.PI / 2;
+    scene.add(ring);
+  });
+  const basketWP = toWorld(-1.6, 0, 0.3);
+  // Coconuts in basket (knockable)
+  [[-0.05, 0.34, 0.05], [0.08, 0.37, -0.07], [-0.08, 0.40, -0.02]].forEach(([ox, oy, oz]) => {
+    addKnockable(
+      new THREE.SphereGeometry(0.11, 7, 7), coconutShellMat.clone(),
+      -1.6 + ox, oy, 0.3 + oz, 0.11
+    );
+  });
+
+  // === WOODEN CRATES (climbable!) ===
+  const crateGeo = new THREE.BoxGeometry(0.6, 0.5, 0.6);
+  const crateMat = new THREE.MeshStandardMaterial({ color: 0xC4A060, roughness: 0.85 });
+  addMesh(crateGeo, crateMat, 1.8, 0.25, -0.6, { rotY: 0.2, receiveShadow: true });
+  const crateWP = toWorld(1.8, 0.25, -0.6);
+  platformColliders.push({ x: crateWP.x, y: crateWP.y + gy, z: crateWP.z, hw: 0.3, hh: 0.25, hd: 0.3 });
+  // Edge lines
+  const crateEdges = new THREE.LineSegments(
+    new THREE.EdgesGeometry(crateGeo),
+    new THREE.LineBasicMaterial({ color: 0x6A5030, transparent: true, opacity: 0.25 })
+  );
+  crateEdges.position.set(crateWP.x, crateWP.y, crateWP.z);
+  crateEdges.rotation.y = hutAngle + 0.2;
+  scene.add(crateEdges);
+
+  // Second smaller crate on top (climbable!)
+  const crate2Geo = new THREE.BoxGeometry(0.45, 0.4, 0.45);
+  addMesh(crate2Geo, new THREE.MeshStandardMaterial({ color: 0xBCA058, roughness: 0.85 }), 1.75, 0.7, -0.55, { rotY: -0.15, receiveShadow: true });
+  const crate2WP = toWorld(1.75, 0.7, -0.55);
+  platformColliders.push({ x: crate2WP.x, y: crate2WP.y + gy, z: crate2WP.z, hw: 0.22, hh: 0.2, hd: 0.22 });
+
+  // === WATER BARREL (climbable!) ===
+  addMesh(
+    new THREE.CylinderGeometry(0.3, 0.28, 0.7, 10),
+    new THREE.MeshStandardMaterial({ color: 0x7A6545, roughness: 0.85 }),
+    -0.8, 0.35, 1.3
+  );
+  [0.1, 0.3, 0.5].forEach(ry => {
+    const rp = toWorld(-0.8, ry, 1.3);
+    const ring = new THREE.Mesh(
+      new THREE.TorusGeometry(0.3, 0.012, 4, 10),
+      new THREE.MeshStandardMaterial({ color: 0x5A4835, roughness: 0.6, metalness: 0.15 })
+    );
+    ring.position.set(rp.x, rp.y, rp.z);
+    ring.rotation.x = Math.PI / 2;
+    scene.add(ring);
+  });
+  const barrelWP = toWorld(-0.8, 0.35, 1.3);
+  staticColliders.push({ x: barrelWP.x, z: barrelWP.z, radius: 0.35 });
+  platformColliders.push({ x: barrelWP.x, y: barrelWP.y + gy, z: barrelWP.z, hw: 0.3, hh: 0.35, hd: 0.3 });
+
+  // Damp sand patch
+  const dampP = toWorld(-0.8, 0.01, 1.3);
+  const dampSand = new THREE.Mesh(
+    new THREE.CircleGeometry(0.6, 10),
+    new THREE.MeshStandardMaterial({ color: 0xC4A878, roughness: 0.9 })
+  );
+  dampSand.rotation.x = -Math.PI / 2;
+  dampSand.position.set(dampP.x, dampP.y, dampP.z);
+  scene.add(dampSand);
+
+  // === SIDE SIGN ("FRESH COCONUTS & MORE") ===
+  const sideSignCanvas = document.createElement('canvas');
+  sideSignCanvas.width = 128; sideSignCanvas.height = 48;
+  const ssctx = sideSignCanvas.getContext('2d');
+  ssctx.fillStyle = '#B0956E'; ssctx.fillRect(0, 0, 128, 48);
+  ssctx.fillStyle = '#4A3520'; ssctx.font = '11px Georgia'; ssctx.textAlign = 'center';
+  ssctx.fillText('FRESH COCONUTS', 64, 20);
+  ssctx.fillText('& MORE', 64, 36);
+  const sideSignTex = new THREE.CanvasTexture(sideSignCanvas);
+  const ssp = toWorld(1.65, 1.6, -1.0);
+  const sideSign = new THREE.Mesh(
+    new THREE.PlaneGeometry(0.5, 0.2),
+    new THREE.MeshStandardMaterial({ map: sideSignTex, roughness: 0.85, side: THREE.DoubleSide })
+  );
+  sideSign.position.set(ssp.x, ssp.y, ssp.z);
+  sideSign.rotation.y = hutAngle + Math.PI / 2;
+  scene.add(sideSign);
+
+  // Fallen coconuts on the sand near the hut
+  createGroundCoconut(HX - 2.2, HZ - 0.5);
+  createGroundCoconut(HX + 2.8, HZ + 0.8);
+  createGroundCoconut(HX - 0.3, HZ - 2.2);
+  createGroundCoconut(HX + 1.5, HZ + 2.0);
+
+  // === WALL COLLIDERS (prevent coconut from going through walls) ===
+  // Left side wall: local x = -1.3, z from -1 to 1
+  for (let lz = -0.8; lz <= 0.8; lz += 0.4) {
+    const wp = toWorld(-1.3, 0, lz);
+    staticColliders.push({ x: wp.x, z: wp.z, radius: 0.25 });
+  }
+  // Right side wall: local x = 1.3, z from -1 to 1 (gap near front for entrance)
+  for (let lz = -0.8; lz <= 0.8; lz += 0.4) {
+    if (lz < -0.2) continue; // skip front section to leave an opening
+    const wp = toWorld(1.3, 0, lz);
+    staticColliders.push({ x: wp.x, z: wp.z, radius: 0.25 });
+  }
+})();
 
 // Seagulls
 for (let i = 0; i < 4; i++) createSeagull();
@@ -1719,19 +2559,24 @@ function updatePhysics(dt) {
   const cfg = MODES[gameMode];
   const dt60 = dt * 60; // normalize to 60fps
 
-  // Input
-  const inp = new THREE.Vector3();
-  if (keys['KeyW'] || keys['ArrowUp']) inp.z -= 1;
-  if (keys['KeyS'] || keys['ArrowDown']) inp.z += 1;
-  if (keys['KeyA'] || keys['ArrowLeft']) inp.x -= 1;
-  if (keys['KeyD'] || keys['ArrowRight']) inp.x += 1;
-  inp.normalize();
+  // Input with smoothing
+  let rawX = 0, rawZ = 0;
+  if (keys['KeyW'] || keys['ArrowUp']) rawZ -= 1;
+  if (keys['KeyS'] || keys['ArrowDown']) rawZ += 1;
+  if (keys['KeyA'] || keys['ArrowLeft']) rawX -= 1;
+  if (keys['KeyD'] || keys['ArrowRight']) rawX += 1;
+  const rawLen = Math.sqrt(rawX * rawX + rawZ * rawZ);
+  if (rawLen > 0) { rawX /= rawLen; rawZ /= rawLen; }
+  // Lerp towards target input
+  const smoothRate = 1.0 - Math.pow(INPUT_SMOOTH, dt60);
+  smoothInputX += (rawX - smoothInputX) * smoothRate;
+  smoothInputZ += (rawZ - smoothInputZ) * smoothRate;
 
   // Rotate input by camera yaw
-  if (inp.lengthSq() > 0) {
+  if (Math.abs(smoothInputX) > 0.001 || Math.abs(smoothInputZ) > 0.001) {
     const s = Math.sin(cameraYaw), c = Math.cos(cameraYaw);
-    const wx = inp.x * c + inp.z * s;
-    const wz = -inp.x * s + inp.z * c;
+    const wx = smoothInputX * c + smoothInputZ * s;
+    const wz = -smoothInputX * s + smoothInputZ * c;
     coconut.vel.x += wx * cfg.moveForce * dt60;
     coconut.vel.z += wz * cfg.moveForce * dt60;
   }
@@ -1809,14 +2654,16 @@ function updatePhysics(dt) {
 
     // Ground friction — much heavier on platforms so coconut stops
     if (onPlatform) {
-      coconut.vel.x *= 0.82;
-      coconut.vel.z *= 0.82;
+      const platFric = Math.pow(0.82, dt60);
+      coconut.vel.x *= platFric;
+      coconut.vel.z *= platFric;
       // Kill very small velocities outright
       if (Math.abs(coconut.vel.x) < 0.02) coconut.vel.x = 0;
       if (Math.abs(coconut.vel.z) < 0.02) coconut.vel.z = 0;
     } else {
-      coconut.vel.x *= cfg.friction;
-      coconut.vel.z *= cfg.friction;
+      const groundFric = Math.pow(cfg.friction, dt60);
+      coconut.vel.x *= groundFric;
+      coconut.vel.z *= groundFric;
     }
   } else {
     coconut.onGround = false;
@@ -1839,7 +2686,7 @@ function updatePhysics(dt) {
   coconut.pos.z = Math.max(-38, Math.min(55, coconut.pos.z));
 
   // Water boundary - gentle push back (only outside parkour area x<3)
-  if (coconut.pos.z < -18 && coconut.pos.x < 3) {
+  if (coconut.pos.z < -18 && coconut.pos.x < 9) {
     coconut.vel.z += ((-18) - coconut.pos.z) * 2 * dt;
   }
 
@@ -1869,19 +2716,25 @@ function updatePhysics(dt) {
     }
   }
 
-  // Rolling rotation
-  if (coconut.onGround && speed > 0.005) {
+  // Rolling rotation (smoothed)
+  if (coconut.onGround && speed > 0.003) {
     const rollAxis = new THREE.Vector3(-coconut.vel.z, 0, coconut.vel.x).normalize();
     const rollAngle = speed * dt / COCONUT_RADIUS * cfg.spinMult;
     coconut.mesh.rotateOnWorldAxis(rollAxis, rollAngle);
+  } else if (!coconut.onGround && speed > 0.01) {
+    // Gentle tumble in the air
+    const rollAxis = new THREE.Vector3(-coconut.vel.z, 0, coconut.vel.x).normalize();
+    const rollAngle = speed * dt / COCONUT_RADIUS * cfg.spinMult * 0.3;
+    coconut.mesh.rotateOnWorldAxis(rollAxis, rollAngle);
   }
 
-  // Angular velocity (wobble)
+  // Angular velocity (wobble) - smoothed decay
   if (Math.abs(coconut.angVel.x) > 0.0001 || Math.abs(coconut.angVel.z) > 0.0001) {
-    coconut.mesh.rotateX(coconut.angVel.x);
-    coconut.mesh.rotateZ(coconut.angVel.z);
-    coconut.angVel.x *= cfg.angularFriction;
-    coconut.angVel.z *= cfg.angularFriction;
+    const angStep = 1.0 - Math.pow(1.0 - cfg.angularFriction, dt60);
+    coconut.mesh.rotateX(coconut.angVel.x * dt60);
+    coconut.mesh.rotateZ(coconut.angVel.z * dt60);
+    coconut.angVel.x *= Math.pow(cfg.angularFriction, dt60);
+    coconut.angVel.z *= Math.pow(cfg.angularFriction, dt60);
   }
 
   // Coconut-coconut collisions
@@ -1917,6 +2770,34 @@ function updatePhysics(dt) {
     }
   }
 
+  // Knockable object collisions (bottles, cups, coconut halves, etc.)
+  for (let i = 0; i < knockableObjects.length; i++) {
+    const ko = knockableObjects[i];
+    const dx = coconut.pos.x - ko.mesh.position.x;
+    const dy = coconut.pos.y - ko.mesh.position.y;
+    const dz = coconut.pos.z - ko.mesh.position.z;
+    const dist3D = Math.sqrt(dx*dx + dy*dy + dz*dz);
+    const minDist = COCONUT_RADIUS + ko.radius;
+    if (dist3D < minDist && dist3D > 0.001) {
+      const nx = dx / dist3D, ny = dy / dist3D, nz = dz / dist3D;
+      const overlap = minDist - dist3D;
+      // Push knockable away strongly
+      ko.mesh.position.x -= nx * overlap * 0.8;
+      ko.mesh.position.y -= ny * overlap * 0.4;
+      ko.mesh.position.z -= nz * overlap * 0.8;
+      // Transfer velocity — knockable objects are light, big impulse
+      const playerSpeed = Math.sqrt(coconut.vel.x*coconut.vel.x + coconut.vel.z*coconut.vel.z);
+      const impulseMag = Math.max(playerSpeed * 1.2, 1.5);
+      ko.vx = -nx * impulseMag + coconut.vel.x * 0.5;
+      ko.vy = Math.abs(ny) * impulseMag * 0.5 + 1.5; // Pop upward
+      ko.vz = -nz * impulseMag + coconut.vel.z * 0.5;
+      ko.settled = false;
+      // Slight recoil on player
+      coconut.vel.x += nx * 0.15;
+      coconut.vel.z += nz * 0.15;
+    }
+  }
+
   // Update mesh
   coconut.mesh.position.copy(coconut.pos);
 
@@ -1940,16 +2821,17 @@ function updateCamera(dt) {
   // Ensure camera doesn't go below ground
   const camGroundY = getGroundHeight(targetX, targetZ) + 0.5;
 
-  camera.position.x += (targetX - camera.position.x) * CAM_SMOOTH * dt;
-  camera.position.y += (Math.max(targetY, camGroundY) - camera.position.y) * CAM_SMOOTH * dt;
-  camera.position.z += (targetZ - camera.position.z) * CAM_SMOOTH * dt;
+  const smoothFactor = 1.0 - Math.exp(-CAM_SMOOTH * dt);
+  camera.position.x += (targetX - camera.position.x) * smoothFactor;
+  camera.position.y += (Math.max(targetY, camGroundY) - camera.position.y) * smoothFactor;
+  camera.position.z += (targetZ - camera.position.z) * smoothFactor;
 
   // Cinematic sway
   const t = performance.now() * 0.0002;
-  camera.position.x += Math.sin(t * 1.1) * 0.035;
-  camera.position.y += Math.sin(t * 1.7) * 0.02;
+  camera.position.x += Math.sin(t * 1.1) * 0.025;
+  camera.position.y += Math.sin(t * 1.7) * 0.015;
 
-  // Look at coconut
+  // Look at coconut (smoothed)
   const lookTarget = coconut.pos.clone();
   lookTarget.y += 0.15;
   camera.lookAt(lookTarget);
@@ -1961,9 +2843,10 @@ function updateWater(dt) {
   const verts = waterGeo.attributes.position;
   for (let i = 0; i < verts.count; i++) {
     const x = verts.getX(i), z = verts.getZ(i);
-    const y = Math.sin(x*0.4 + t*0.8) * 0.18 +
-              Math.cos(z*0.25 + t*0.6) * 0.12 +
-              Math.sin(x*0.15 + z*0.1 + t*0.3) * 0.08;
+    const y = Math.sin(x*0.35 + t*0.7) * 0.22 +
+              Math.cos(z*0.2 + t*0.5) * 0.15 +
+              Math.sin(x*0.12 + z*0.08 + t*0.25) * 0.1 +
+              Math.sin(x*0.8 + z*0.3 + t*1.2) * 0.04;
     verts.setY(i, y);
   }
   verts.needsUpdate = true;
@@ -1976,7 +2859,17 @@ function updateWater(dt) {
     foamVerts.setY(i, y);
   }
   foamVerts.needsUpdate = true;
-  foamMat.opacity = 0.2 + Math.sin(t * 0.5) * 0.1;
+  foamMat.opacity = 0.25 + Math.sin(t * 0.5) * 0.1;
+
+  // Secondary foam animation
+  foam2Mat.opacity = 0.12 + Math.sin(t * 0.7 + 0.5) * 0.06;
+  foam2Mesh.position.z = -16.5 + Math.sin(t * 0.3) * 0.4;
+
+  // Shallow water shimmer
+  shallowMat.opacity = 0.22 + Math.sin(t * 0.4) * 0.06;
+
+  // Wet sand shimmer
+  wetSandMat.opacity = 0.35 + Math.sin(t * 0.25) * 0.05;
 }
 
 // ===== GROUND COCONUT PHYSICS =====
@@ -2036,6 +2929,38 @@ function updateGroundCoconuts(dt) {
         if (gc2.mesh.position.y < gy2) gc2.mesh.position.y = gy2;
       }
     }
+  }
+}
+
+// ===== KNOCKABLE OBJECTS PHYSICS =====
+function updateKnockableObjects(dt) {
+  for (let i = 0; i < knockableObjects.length; i++) {
+    const ko = knockableObjects[i];
+    if (ko.settled) continue;
+    const moving = Math.abs(ko.vx) > 0.003 || Math.abs(ko.vz) > 0.003 || Math.abs(ko.vy) > 0.003;
+    if (!moving) { ko.settled = true; continue; }
+    // Gravity
+    ko.vy -= GRAVITY * dt;
+    // Move
+    ko.mesh.position.x += ko.vx * dt;
+    ko.mesh.position.y += ko.vy * dt;
+    ko.mesh.position.z += ko.vz * dt;
+    // Ground collision
+    const groundY = getGroundHeight(ko.mesh.position.x, ko.mesh.position.z) + ko.radius * 0.5;
+    if (ko.mesh.position.y <= groundY) {
+      ko.mesh.position.y = groundY;
+      if (ko.vy < 0) ko.vy *= -0.25;
+      if (Math.abs(ko.vy) < 0.06) ko.vy = 0;
+    }
+    // Friction
+    ko.vx *= 0.94;
+    ko.vz *= 0.94;
+    // Tumble rotation for visual effect
+    ko.mesh.rotation.x += ko.vx * dt * 3;
+    ko.mesh.rotation.z += ko.vz * dt * 3;
+    // Boundaries
+    ko.mesh.position.x = Math.max(-55, Math.min(55, ko.mesh.position.x));
+    ko.mesh.position.z = Math.max(-38, Math.min(55, ko.mesh.position.z));
   }
 }
 
@@ -2099,6 +3024,7 @@ function updateScore(dt) {
     scoreAccum -= 1;
     sessionScore++;
     totalScore++;
+    if (sessionScore > highScore) highScore = sessionScore;
     checkAchievements();
   }
   // Save periodically (every 10 seconds)
@@ -2126,6 +3052,7 @@ function showAchievement(ach) {
 // ===== UI =====
 const hudMode = document.getElementById('hud-mode');
 const hudScore = document.getElementById('hud-score');
+const hudHighScore = document.getElementById('hud-highscore');
 const hudTime = document.getElementById('hud-time');
 const hudNext = document.getElementById('hud-next');
 const hudFps = document.getElementById('hud-fps');
@@ -2156,6 +3083,7 @@ let currentSubtitle = 0;
 
 function updateUI() {
   hudScore.textContent = totalScore.toLocaleString();
+  hudHighScore.textContent = 'Best: ' + highScore.toLocaleString();
 
   const totalSec = totalScore;
   const h = Math.floor(totalSec / 3600);
@@ -2323,6 +3251,7 @@ function animate() {
     } else {
       updatePhysics(dt);
       updateGroundCoconuts(dt);
+      updateKnockableObjects(dt);
       updateCamera(dt);
       updateCrabs(dt);
       updateSubtitle(dt);
