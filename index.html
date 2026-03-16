@@ -2403,6 +2403,521 @@ createStarfish(16, -19);
   }
 })();
 
+// ===== PARKOUR COURSE 2: "The Coconut Ascension" =====
+// A ceremonial coconut path in the quieter left shore, x=-25 to x=-45, z=30 to z=-12
+(function createCeremonialCourse() {
+  const CX = -30; // course center x offset
+  const stoneCol = 0x8A8070;
+  const stoneDarkCol = 0x6A6558;
+  const stoneMat = new THREE.MeshStandardMaterial({ color: stoneCol, roughness: 0.82, metalness: 0.03, flatShading: true });
+  const stoneDarkMat = new THREE.MeshStandardMaterial({ color: stoneDarkCol, roughness: 0.85, metalness: 0.02, flatShading: true });
+  const ceremonialWoodMat = new THREE.MeshStandardMaterial({ color: 0x7A6545, roughness: 0.9 });
+  const ceremonialDarkWoodMat = new THREE.MeshStandardMaterial({ color: 0x5A4A35, roughness: 0.88 });
+  const shellWhiteMat = new THREE.MeshStandardMaterial({ color: 0xF0E8DC, roughness: 0.7, flatShading: true });
+  const shellPinkMat = new THREE.MeshStandardMaterial({ color: 0xE8C8B8, roughness: 0.72, flatShading: true });
+  const coralMat = new THREE.MeshStandardMaterial({ color: 0xD8A888, roughness: 0.8, flatShading: true });
+  const ropeMat2 = new THREE.MeshStandardMaterial({ color: 0xC4A870, roughness: 0.95 });
+  const plankMat2 = new THREE.MeshStandardMaterial({ color: 0xB0956E, roughness: 0.85 });
+  const flagMat = new THREE.MeshStandardMaterial({ color: 0xE8D0A0, roughness: 0.9, side: THREE.DoubleSide });
+  const flagDarkMat = new THREE.MeshStandardMaterial({ color: 0xC8A870, roughness: 0.88, side: THREE.DoubleSide });
+
+  function addPlatform(x, z, w, h, d, mat, yOffset) {
+    yOffset = yOffset || 0;
+    const gy = getGroundHeight(x, z);
+    const mesh = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), mat || stoneMat);
+    mesh.position.set(x, gy + h/2 + yOffset, z);
+    mesh.castShadow = true; mesh.receiveShadow = true;
+    scene.add(mesh);
+    platformColliders.push({ x: x, y: gy + h/2 + yOffset, z: z, hw: w/2, hh: h/2, hd: d/2 });
+    return mesh;
+  }
+
+  function addCylPlatform(x, z, radius, h, mat, yOffset) {
+    yOffset = yOffset || 0;
+    const gy = getGroundHeight(x, z);
+    const mesh = new THREE.Mesh(new THREE.CylinderGeometry(radius, radius + 0.05, h, 12), mat || stoneMat);
+    mesh.position.set(x, gy + h/2 + yOffset, z);
+    mesh.castShadow = true; mesh.receiveShadow = true;
+    scene.add(mesh);
+    platformColliders.push({ x: x, y: gy + h/2 + yOffset, z: z, hw: radius*0.75, hh: h/2, hd: radius*0.75 });
+    return mesh;
+  }
+
+  // === ENTRANCE SIGN ===
+  (function() {
+    const signX = CX + 3, signZ = 30;
+    const gy = getGroundHeight(signX, signZ);
+    // Two carved wooden gate posts
+    [-1.2, 1.2].forEach(side => {
+      const post = new THREE.Mesh(new THREE.CylinderGeometry(0.12, 0.15, 3.0, 6), ceremonialDarkWoodMat);
+      post.position.set(signX + side, gy + 1.5, signZ);
+      post.rotation.z = side * 0.06; // slight lean outward
+      post.castShadow = true;
+      scene.add(post);
+      // Carved notch rings
+      [0.6, 1.2, 1.8, 2.4].forEach(ry => {
+        const ring = new THREE.Mesh(new THREE.TorusGeometry(0.16, 0.02, 4, 8), ceremonialWoodMat);
+        ring.position.set(signX + side, gy + ry, signZ);
+        ring.rotation.x = Math.PI/2;
+        scene.add(ring);
+      });
+    });
+    // Crossbeam
+    const beam = new THREE.Mesh(new THREE.BoxGeometry(2.8, 0.12, 0.12), ceremonialWoodMat);
+    beam.position.set(signX, gy + 2.8, signZ);
+    beam.castShadow = true;
+    scene.add(beam);
+    // Sign board
+    const boardMesh = new THREE.Mesh(new THREE.BoxGeometry(2.0, 0.5, 0.06), ceremonialDarkWoodMat);
+    boardMesh.position.set(signX, gy + 2.25, signZ);
+    boardMesh.castShadow = true;
+    scene.add(boardMesh);
+    // Sign text
+    const sc = document.createElement('canvas'); sc.width = 256; sc.height = 64;
+    const sx = sc.getContext('2d');
+    sx.fillStyle = '#5A4A35'; sx.fillRect(0,0,256,64);
+    for (let i = 0; i < 200; i++) { sx.fillStyle = `rgba(40,30,15,${Math.random()*0.06})`; sx.fillRect(Math.random()*256,0,1,64); }
+    sx.fillStyle = '#F0E0C0'; sx.font = 'bold 18px Georgia'; sx.textAlign = 'center';
+    sx.fillText('THE COCONUT ASCENSION', 128, 26);
+    sx.font = 'italic 11px Georgia'; sx.fillStyle = '#D0C090';
+    sx.fillText('A Sacred Trial for Round Objects', 128, 48);
+    const signTex = new THREE.CanvasTexture(sc);
+    const signFace = new THREE.Mesh(new THREE.PlaneGeometry(1.9, 0.46), new THREE.MeshStandardMaterial({ map: signTex, roughness: 0.85 }));
+    signFace.position.set(signX, gy + 2.25, signZ + 0.04);
+    scene.add(signFace);
+    const signBack = new THREE.Mesh(new THREE.PlaneGeometry(1.9, 0.46), new THREE.MeshStandardMaterial({ map: signTex, roughness: 0.85 }));
+    signBack.position.set(signX, gy + 2.25, signZ - 0.04);
+    signBack.rotation.y = Math.PI;
+    scene.add(signBack);
+    // Dangling coconut ornaments
+    [-0.7, 0.7].forEach(ox => {
+      const rope = new THREE.Mesh(new THREE.CylinderGeometry(0.01, 0.01, 0.4, 3), ropeMat2);
+      rope.position.set(signX + ox, gy + 1.8, signZ);
+      scene.add(rope);
+      const orn = new THREE.Mesh(new THREE.SphereGeometry(0.1, 6, 6), new THREE.MeshStandardMaterial({ color: 0x5C3118, roughness: 0.8 }));
+      orn.position.set(signX + ox, gy + 1.55, signZ);
+      orn.castShadow = true;
+      scene.add(orn);
+    });
+  })();
+
+  // === SECTION 1: Ring Path — Circular Stone Altars ===
+  const ringCenters = [
+    [CX + 2, 27, 0.8], [CX - 1, 25, 0.9], [CX + 3, 23, 0.7],
+    [CX + 0, 21, 1.0], [CX - 2, 19, 0.85], [CX + 2, 17, 0.75],
+    [CX - 1, 15, 0.95], [CX + 1, 13, 0.8]
+  ];
+  ringCenters.forEach(([rx, rz, rs]) => {
+    const mat = Math.random() > 0.5 ? stoneMat.clone() : stoneDarkMat.clone();
+    addCylPlatform(rx, rz, rs, 0.25 + Math.random()*0.15, mat);
+    // Small decorative ring etched into surface
+    const gy = getGroundHeight(rx, rz);
+    const ring = new THREE.Mesh(new THREE.TorusGeometry(rs * 0.6, 0.02, 4, 12), stoneDarkMat);
+    ring.position.set(rx, gy + 0.35, rz);
+    ring.rotation.x = Math.PI/2;
+    scene.add(ring);
+  });
+
+  // === SECTION 2: Tide Pool Lane — Sandbars & Rock Islands ===
+  const tideBaseZ = 11;
+  const tideSandMat = new THREE.MeshStandardMaterial({ color: 0xE8D090, roughness: 0.8, flatShading: true });
+  // Shallow water channels (visual)
+  for (let i = 0; i < 4; i++) {
+    const wx = CX - 2 + i * 2;
+    const wz = tideBaseZ - i * 1.5;
+    const gy = getGroundHeight(wx, wz);
+    const water = new THREE.Mesh(
+      new THREE.PlaneGeometry(3, 1.2),
+      new THREE.MeshStandardMaterial({ color: 0x40B8C8, transparent: true, opacity: 0.45, roughness: 0.05, metalness: 0.4 })
+    );
+    water.rotation.x = -Math.PI/2;
+    water.position.set(wx, gy + 0.02, wz);
+    scene.add(water);
+  }
+  // Narrow sandbar platforms
+  const tidePlatforms = [
+    [CX + 1, tideBaseZ, 1.8, 0.18, 0.7], [CX - 1.5, tideBaseZ - 1.5, 1.5, 0.2, 0.6],
+    [CX + 0.5, tideBaseZ - 3, 2.0, 0.16, 0.5], [CX - 2, tideBaseZ - 4.5, 1.4, 0.22, 0.65],
+    [CX + 1.5, tideBaseZ - 5.5, 1.6, 0.18, 0.55], [CX - 0.5, tideBaseZ - 7, 1.8, 0.2, 0.6]
+  ];
+  tidePlatforms.forEach(([tx, tz, tw, th, td]) => {
+    const mat = Math.random() > 0.6 ? tideSandMat.clone() : stoneMat.clone();
+    const p = addPlatform(tx, tz, tw, th, td, mat);
+    p.rotation.y = (Math.random()-0.5) * 0.3;
+  });
+  // Rock islands between sandbars
+  const tideRocks = [
+    [CX + 2.5, tideBaseZ - 2, 0.5], [CX - 3, tideBaseZ - 3, 0.45],
+    [CX + 2, tideBaseZ - 6, 0.4], [CX - 2.5, tideBaseZ - 5, 0.55]
+  ];
+  tideRocks.forEach(([rx, rz, rs]) => {
+    addCylPlatform(rx, rz, rs, 0.3, stoneDarkMat.clone());
+  });
+
+  // === SECTION 3: Shell Garden — Giant Shells & Coral Platforms ===
+  const shellBaseZ = 2;
+  // Giant conch shells as platforms (stretched sphere halves)
+  const shellPlatforms = [
+    [CX - 1, shellBaseZ, 1.2, 0.35], [CX + 2, shellBaseZ - 2, 1.0, 0.3],
+    [CX - 2, shellBaseZ - 3.5, 1.3, 0.4], [CX + 1, shellBaseZ - 5, 1.1, 0.32],
+    [CX + 3, shellBaseZ - 4, 0.9, 0.28]
+  ];
+  shellPlatforms.forEach(([sx, sz, sr, sh]) => {
+    const mat = Math.random() > 0.5 ? shellWhiteMat.clone() : shellPinkMat.clone();
+    const geo = new THREE.SphereGeometry(sr, 8, 6, 0, Math.PI*2, 0, Math.PI*0.5);
+    const gy = getGroundHeight(sx, sz);
+    const mesh = new THREE.Mesh(geo, mat);
+    mesh.position.set(sx, gy + sh * 0.3, sz);
+    mesh.rotation.y = Math.random() * Math.PI * 2;
+    mesh.castShadow = true; mesh.receiveShadow = true;
+    scene.add(mesh);
+    platformColliders.push({ x: sx, y: gy + sh * 0.3, z: sz, hw: sr*0.7, hh: sh*0.4, hd: sr*0.7 });
+  });
+  // Coral-like stone ridges (curved walls to navigate around)
+  const coralRidges = [
+    [CX + 0.5, shellBaseZ - 1, 0.4], [CX - 1.5, shellBaseZ - 2.5, 0.35],
+    [CX + 2.5, shellBaseZ - 3, 0.3], [CX - 0.5, shellBaseZ - 4.5, 0.45]
+  ];
+  coralRidges.forEach(([cx, cz, ch]) => {
+    const gy = getGroundHeight(cx, cz);
+    const coral = new THREE.Mesh(
+      new THREE.DodecahedronGeometry(0.4, 1),
+      coralMat.clone()
+    );
+    coral.position.set(cx, gy + ch, cz);
+    coral.scale.set(1.5, 0.6, 1.2);
+    coral.rotation.y = Math.random() * Math.PI;
+    coral.castShadow = true;
+    scene.add(coral);
+  });
+  // Decorative oversized shells (non-platform, visual)
+  for (let i = 0; i < 6; i++) {
+    const sx = CX + (Math.random()-0.5)*8;
+    const sz = shellBaseZ - Math.random()*6;
+    const gy = getGroundHeight(sx, sz);
+    const shell = new THREE.Mesh(
+      new THREE.SphereGeometry(0.2 + Math.random()*0.15, 5, 4),
+      Math.random() > 0.5 ? shellWhiteMat : shellPinkMat
+    );
+    shell.scale.set(1, 0.3, 1.3);
+    shell.position.set(sx, gy + 0.05, sz);
+    shell.rotation.y = Math.random() * Math.PI * 2;
+    shell.castShadow = true;
+    scene.add(shell);
+  }
+
+  // === SECTION 4: Coconut Shrine Staircase ===
+  const shrineBaseX = CX - 1;
+  const shrineBaseZ = -4;
+  const stairCount = 7;
+  for (let i = 0; i < stairCount; i++) {
+    const sw = 3.5 - i * 0.25; // narrowing as it goes up
+    const sd = 1.2;
+    const sh = 0.22;
+    const sx = shrineBaseX;
+    const sz = shrineBaseZ - i * 1.0;
+    const yOff = i * 0.22;
+    addPlatform(sx, sz, sw, sh, sd, i % 2 === 0 ? stoneMat.clone() : stoneDarkMat.clone(), yOff);
+    // Coconut "statues" on edges of each stair
+    if (i > 0 && i < stairCount - 1) {
+      [-1, 1].forEach(side => {
+        const cocoX = sx + side * (sw/2 - 0.15);
+        const cocoZ = sz;
+        const gy = getGroundHeight(cocoX, cocoZ);
+        const coco = new THREE.Mesh(
+          new THREE.SphereGeometry(0.12, 7, 7),
+          new THREE.MeshStandardMaterial({ color: 0x5C3118, roughness: 0.8 })
+        );
+        coco.position.set(cocoX, gy + yOff + sh/2 + 0.12, cocoZ);
+        coco.castShadow = true;
+        scene.add(coco);
+      });
+    }
+  }
+  // Carved driftwood poles with flags flanking the staircase
+  [-2.2, 2.2].forEach(side => {
+    const polePairs = [shrineBaseZ - 1, shrineBaseZ - 4];
+    polePairs.forEach(pz => {
+      const px = shrineBaseX + side;
+      const gy = getGroundHeight(px, pz);
+      const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.06, 0.08, 2.5, 5), ceremonialDarkWoodMat);
+      pole.position.set(px, gy + 1.25, pz);
+      pole.castShadow = true;
+      scene.add(pole);
+      // Notches
+      [0.4, 0.8, 1.2].forEach(nr => {
+        const notch = new THREE.Mesh(new THREE.TorusGeometry(0.09, 0.01, 3, 6), ceremonialWoodMat);
+        notch.position.set(px, gy + nr, pz);
+        notch.rotation.x = Math.PI/2;
+        scene.add(notch);
+      });
+      // Tattered flag
+      const flag = new THREE.Mesh(
+        new THREE.PlaneGeometry(0.5, 0.35),
+        side > 0 ? flagMat : flagDarkMat
+      );
+      flag.position.set(px + side * 0.15, gy + 2.1, pz);
+      flag.rotation.y = side > 0 ? -0.3 : 0.3;
+      flag.rotation.z = (Math.random()-0.5) * 0.15;
+      flag.castShadow = true;
+      scene.add(flag);
+    });
+  });
+  // Small torch-like coconut shells on stands at top of stairs
+  [-1, 1].forEach(side => {
+    const tx = shrineBaseX + side * 1.2;
+    const tz = shrineBaseZ - (stairCount - 1) * 1.0;
+    const gy = getGroundHeight(tx, tz);
+    const topY = (stairCount - 1) * 0.22;
+    const stand = new THREE.Mesh(new THREE.CylinderGeometry(0.04, 0.06, 1.0, 5), ceremonialDarkWoodMat);
+    stand.position.set(tx, gy + topY + 0.5, tz);
+    stand.castShadow = true;
+    scene.add(stand);
+    const bowl = new THREE.Mesh(
+      new THREE.SphereGeometry(0.12, 6, 4, 0, Math.PI*2, 0, Math.PI*0.6),
+      new THREE.MeshStandardMaterial({ color: 0x5A3A18, roughness: 0.8 })
+    );
+    bowl.position.set(tx, gy + topY + 1.0, tz);
+    bowl.castShadow = true;
+    scene.add(bowl);
+    // "Fire" glow (small bright sphere)
+    const glow = new THREE.Mesh(
+      new THREE.SphereGeometry(0.06, 6, 6),
+      new THREE.MeshBasicMaterial({ color: 0xFFAA40, transparent: true, opacity: 0.6 })
+    );
+    glow.position.set(tx, gy + topY + 1.08, tz);
+    scene.add(glow);
+    const torchLight = new THREE.PointLight(0xFFAA40, 0.15, 5, 2);
+    torchLight.position.set(tx, gy + topY + 1.1, tz);
+    scene.add(torchLight);
+  });
+
+  // === SECTION 5: Chain Sway Bridges ===
+  const bridgeBaseZ = -11;
+  // Series of short rope-plank bridges between rocky islets
+  const islets = [
+    [CX - 2, bridgeBaseZ, 1.0, 0.5],
+    [CX + 1, bridgeBaseZ - 2.5, 0.8, 0.6],
+    [CX - 1, bridgeBaseZ - 5, 0.9, 0.55],
+    [CX + 2, bridgeBaseZ - 7.5, 0.85, 0.65],
+    [CX - 0.5, bridgeBaseZ - 10, 1.1, 0.5]
+  ];
+  islets.forEach(([ix, iz, ir, ih]) => {
+    addCylPlatform(ix, iz, ir, ih, stoneDarkMat.clone());
+    // Small decorative stone rim
+    const gy = getGroundHeight(ix, iz);
+    const rim = new THREE.Mesh(new THREE.TorusGeometry(ir + 0.05, 0.04, 4, 12), stoneMat);
+    rim.position.set(ix, gy + ih, iz);
+    rim.rotation.x = Math.PI/2;
+    scene.add(rim);
+  });
+  // Plank bridges connecting islets
+  for (let i = 0; i < islets.length - 1; i++) {
+    const [x1, z1] = islets[i];
+    const [x2, z2] = islets[i + 1];
+    const mx = (x1+x2)/2, mz = (z1+z2)/2;
+    const dist = Math.sqrt((x2-x1)**2 + (z2-z1)**2);
+    const angle = Math.atan2(x2-x1, z2-z1);
+    const gy1 = getGroundHeight(x1, z1) + islets[i][3];
+    const gy2 = getGroundHeight(x2, z2) + islets[i+1][3];
+    const mgy = (gy1 + gy2) / 2;
+    // Plank
+    const plank = new THREE.Mesh(new THREE.BoxGeometry(0.6, 0.06, dist - 0.5), plankMat2);
+    plank.position.set(mx, mgy - 0.08, mz);
+    plank.rotation.y = angle;
+    plank.castShadow = true; plank.receiveShadow = true;
+    scene.add(plank);
+    // Platform collider for bridge
+    const bridgeHW = 0.3, bridgeHD = (dist - 0.5)/2;
+    const cosB = Math.cos(angle), sinB = Math.sin(angle);
+    platformColliders.push({ x: mx, y: mgy - 0.08, z: mz, hw: bridgeHW, hh: 0.04, hd: bridgeHD });
+    // Rope rails
+    [-0.3, 0.3].forEach(side => {
+      const rsx = mx + Math.cos(angle + Math.PI/2) * side;
+      const rsz = mz - Math.sin(angle + Math.PI/2) * side;
+      // Rope
+      const curve = new THREE.QuadraticBezierCurve3(
+        new THREE.Vector3(x1 + Math.cos(angle + Math.PI/2)*side, gy1 + 0.3, z1 - Math.sin(angle + Math.PI/2)*side),
+        new THREE.Vector3(rsx, mgy + 0.15, rsz),
+        new THREE.Vector3(x2 + Math.cos(angle + Math.PI/2)*side, gy2 + 0.3, z2 - Math.sin(angle + Math.PI/2)*side)
+      );
+      const tubeGeo = new THREE.TubeGeometry(curve, 8, 0.015, 3, false);
+      const rope = new THREE.Mesh(tubeGeo, ropeMat2);
+      scene.add(rope);
+    });
+    // Short posts at bridge ends
+    [0, 1].forEach(end => {
+      const px = end === 0 ? x1 : x2;
+      const pz = end === 0 ? z1 : z2;
+      const pgy = end === 0 ? gy1 : gy2;
+      [-0.3, 0.3].forEach(side => {
+        const postX = px + Math.cos(angle + Math.PI/2) * side;
+        const postZ = pz - Math.sin(angle + Math.PI/2) * side;
+        const post = new THREE.Mesh(new THREE.CylinderGeometry(0.03, 0.04, 0.5, 4), ceremonialWoodMat);
+        post.position.set(postX, pgy + 0.25, postZ);
+        post.castShadow = true;
+        scene.add(post);
+      });
+    });
+  }
+
+  // === SECTION 6: Spiral Dune Bowl ===
+  const bowlX = CX + 1, bowlZ = bridgeBaseZ - 14;
+  const bowlRadius = 4;
+  const bowlSegments = 24;
+  // Raised outer rim segments
+  for (let i = 0; i < bowlSegments; i++) {
+    const a = (i / bowlSegments) * Math.PI * 2;
+    const rx = bowlX + Math.cos(a) * bowlRadius;
+    const rz = bowlZ + Math.sin(a) * bowlRadius;
+    const gy = getGroundHeight(rx, rz);
+    const rimH = 0.3 + Math.sin(a * 2) * 0.1;
+    const rim = new THREE.Mesh(
+      new THREE.BoxGeometry(1.2, rimH, 0.4),
+      i % 3 === 0 ? stoneDarkMat.clone() : stoneMat.clone()
+    );
+    rim.position.set(rx, gy + rimH/2, rz);
+    rim.rotation.y = a + Math.PI/2;
+    rim.castShadow = true; rim.receiveShadow = true;
+    scene.add(rim);
+    platformColliders.push({ x: rx, y: gy + rimH/2, z: rz, hw: 0.6, hh: rimH/2, hd: 0.2 });
+  }
+  // Bowl floor — smooth circular platform slightly depressed
+  const bowlFloor = new THREE.Mesh(
+    new THREE.CylinderGeometry(bowlRadius - 0.5, bowlRadius - 0.3, 0.15, 20),
+    new THREE.MeshStandardMaterial({ color: 0xE0C888, roughness: 0.8, flatShading: true })
+  );
+  const bowlGy = getGroundHeight(bowlX, bowlZ);
+  bowlFloor.position.set(bowlX, bowlGy + 0.07, bowlZ);
+  bowlFloor.receiveShadow = true;
+  scene.add(bowlFloor);
+  platformColliders.push({ x: bowlX, y: bowlGy + 0.07, z: bowlZ, hw: bowlRadius - 0.5, hh: 0.08, hd: bowlRadius - 0.5 });
+  // Exit ramp from bowl center going forward
+  const rampLen = 2.5;
+  const ramp = new THREE.Mesh(
+    new THREE.BoxGeometry(1.2, 0.15, rampLen),
+    stoneMat.clone()
+  );
+  const rampZ = bowlZ - bowlRadius - rampLen/2 + 0.5;
+  const rampGy = getGroundHeight(bowlX, rampZ);
+  ramp.position.set(bowlX, rampGy + 0.2, rampZ);
+  ramp.rotation.x = -0.08; // slight upward angle
+  ramp.castShadow = true; ramp.receiveShadow = true;
+  scene.add(ramp);
+  platformColliders.push({ x: bowlX, y: rampGy + 0.2, z: rampZ, hw: 0.6, hh: 0.08, hd: rampLen/2 });
+  // Spiral guide stones inside bowl
+  for (let i = 0; i < 12; i++) {
+    const t = i / 12;
+    const spiralR = bowlRadius * 0.8 * (1 - t);
+    const spiralA = t * Math.PI * 3;
+    const sx = bowlX + Math.cos(spiralA) * spiralR;
+    const sz = bowlZ + Math.sin(spiralA) * spiralR;
+    const gy = getGroundHeight(sx, sz);
+    const stone = new THREE.Mesh(
+      new THREE.SphereGeometry(0.15 + t * 0.1, 5, 4),
+      stoneDarkMat
+    );
+    stone.position.set(sx, gy + 0.2, sz);
+    stone.scale.y = 0.5;
+    stone.castShadow = true;
+    scene.add(stone);
+  }
+
+  // === SECTION 7: Sun Platform Finish ===
+  const finishX = bowlX, finishZ = rampZ - rampLen/2 - 2;
+  const finishGy = getGroundHeight(finishX, finishZ);
+  // Broad circular stone dais — three tiers
+  [2.2, 1.6, 1.0].forEach((r, i) => {
+    const tierH = 0.2;
+    const tier = new THREE.Mesh(
+      new THREE.CylinderGeometry(r, r + 0.1, tierH, 16),
+      i === 2 ? stoneDarkMat.clone() : stoneMat.clone()
+    );
+    tier.position.set(finishX, finishGy + tierH/2 + i * tierH, finishZ);
+    tier.castShadow = true; tier.receiveShadow = true;
+    scene.add(tier);
+  });
+  // Platform collider for entire dais
+  platformColliders.push({ x: finishX, y: finishGy + 0.3, z: finishZ, hw: 2.0, hh: 0.3, hd: 2.0 });
+  // "Elder Coconut" at the center
+  const elderCoco = new THREE.Mesh(
+    new THREE.SphereGeometry(0.2, 10, 10),
+    new THREE.MeshStandardMaterial({ color: 0x6A3A15, roughness: 0.7, metalness: 0.05 })
+  );
+  elderCoco.position.set(finishX, finishGy + 0.8, finishZ);
+  elderCoco.castShadow = true;
+  scene.add(elderCoco);
+  // Golden glow beneath elder coconut
+  const elderGlow = new THREE.PointLight(0xFFE080, 0.3, 4, 2);
+  elderGlow.position.set(finishX, finishGy + 0.7, finishZ);
+  scene.add(elderGlow);
+  const elderGlowSphere = new THREE.Mesh(
+    new THREE.SphereGeometry(0.08, 6, 6),
+    new THREE.MeshBasicMaterial({ color: 0xFFE080, transparent: true, opacity: 0.3 })
+  );
+  elderGlowSphere.position.set(finishX, finishGy + 0.7, finishZ);
+  scene.add(elderGlowSphere);
+  // "Coconut of Meaning" mini-sign
+  const finSignC = document.createElement('canvas'); finSignC.width = 200; finSignC.height = 48;
+  const fsx = finSignC.getContext('2d');
+  fsx.fillStyle = '#5A4A35'; fsx.fillRect(0,0,200,48);
+  fsx.fillStyle = '#F0E0C0'; fsx.font = 'bold 13px Georgia'; fsx.textAlign = 'center';
+  fsx.fillText('THE ELDER COCONUT', 100, 18);
+  fsx.font = 'italic 10px Georgia'; fsx.fillStyle = '#C8B890';
+  fsx.fillText('"It has always been here."', 100, 36);
+  const finSignTex = new THREE.CanvasTexture(finSignC);
+  const finSignMesh = new THREE.Mesh(
+    new THREE.PlaneGeometry(0.7, 0.2),
+    new THREE.MeshStandardMaterial({ map: finSignTex, roughness: 0.85, side: THREE.DoubleSide })
+  );
+  finSignMesh.position.set(finishX, finishGy + 0.35, finishZ + 1.5);
+  scene.add(finSignMesh);
+  // Finishing pole (mini)
+  const finPost = new THREE.Mesh(new THREE.CylinderGeometry(0.04, 0.05, 0.8, 4), ceremonialDarkWoodMat);
+  finPost.position.set(finishX, finishGy + 0.4 + 0.35, finishZ + 1.5);
+  finPost.castShadow = true;
+  scene.add(finPost);
+  // Surrounding ceremonial coconuts on the dais edge
+  for (let i = 0; i < 8; i++) {
+    const a = (i / 8) * Math.PI * 2;
+    const cx = finishX + Math.cos(a) * 1.4;
+    const cz = finishZ + Math.sin(a) * 1.4;
+    const coco = new THREE.Mesh(
+      new THREE.SphereGeometry(0.1, 6, 6),
+      new THREE.MeshStandardMaterial({ color: 0x5C3118, roughness: 0.8 })
+    );
+    coco.position.set(cx, finishGy + 0.55, cz);
+    coco.castShadow = true;
+    scene.add(coco);
+  }
+  // Four tall corner poles with flags
+  [0, Math.PI/2, Math.PI, Math.PI*1.5].forEach((a, i) => {
+    const px = finishX + Math.cos(a) * 2.8;
+    const pz = finishZ + Math.sin(a) * 2.8;
+    const pgy = getGroundHeight(px, pz);
+    const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.07, 2.8, 5), ceremonialDarkWoodMat);
+    pole.position.set(px, pgy + 1.4, pz);
+    pole.castShadow = true;
+    scene.add(pole);
+    const flag = new THREE.Mesh(
+      new THREE.PlaneGeometry(0.6, 0.4),
+      i % 2 === 0 ? flagMat : flagDarkMat
+    );
+    flag.position.set(px + (Math.random()-0.5)*0.1, pgy + 2.5, pz);
+    flag.rotation.y = a + Math.PI/4;
+    flag.rotation.z = (Math.random()-0.5)*0.1;
+    flag.castShadow = true;
+    scene.add(flag);
+  });
+})();
+
+// Course 2 decorative shells & starfish
+createShell(-26, 20);
+createShell(-33, 15);
+createShell(-28, 5);
+createStarfish(-27, 25);
+createStarfish(-32, 0);
+
 // Seagulls
 for (let i = 0; i < 4; i++) createSeagull();
 
