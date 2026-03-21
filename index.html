@@ -90,6 +90,53 @@ canvas{display:block}
 #vignette{position:fixed;top:0;left:0;width:100%;height:100%;
   background:radial-gradient(ellipse at center,transparent 55%,rgba(0,0,0,0.35) 100%);
   pointer-events:none;z-index:99}
+
+/* ===== MOBILE TOUCH CONTROLS ===== */
+#touch-controls{display:none;position:fixed;bottom:0;left:0;width:100%;height:100%;z-index:110;pointer-events:none}
+.touch-visible #touch-controls{display:block}
+
+/* Virtual joystick */
+#joystick-zone{position:absolute;bottom:20px;left:20px;width:140px;height:140px;pointer-events:all;touch-action:none}
+#joystick-base{position:absolute;width:120px;height:120px;border-radius:50%;background:rgba(255,255,255,0.1);border:2px solid rgba(255,255,255,0.2);left:10px;top:10px}
+#joystick-knob{position:absolute;width:50px;height:50px;border-radius:50%;background:rgba(255,255,255,0.35);left:45px;top:45px;transition:none;pointer-events:none}
+
+/* Action buttons */
+#touch-action-zone{position:absolute;bottom:30px;right:20px;display:flex;flex-direction:column;gap:12px;pointer-events:all}
+.touch-btn{width:58px;height:58px;border-radius:50%;background:rgba(255,255,255,0.12);border:2px solid rgba(255,255,255,0.2);
+  color:rgba(255,255,255,0.6);font-size:0.55em;font-family:Georgia,serif;display:flex;align-items:center;justify-content:center;
+  pointer-events:all;touch-action:none;letter-spacing:1px;text-transform:uppercase}
+.touch-btn:active{background:rgba(255,255,255,0.3);transform:scale(0.92)}
+
+/* Top mobile HUD buttons */
+#mobile-hud-btns{display:none;position:fixed;top:10px;left:50%;transform:translateX(-50%);z-index:115;gap:10px;pointer-events:all}
+.touch-visible #mobile-hud-btns{display:flex}
+.mhud-btn{width:38px;height:38px;border-radius:8px;background:rgba(255,255,255,0.1);border:1px solid rgba(255,255,255,0.18);
+  color:rgba(255,255,255,0.5);font-size:0.7em;display:flex;align-items:center;justify-content:center;cursor:pointer}
+.mhud-btn:active{background:rgba(255,255,255,0.25)}
+
+/* ===== MOBILE RESPONSIVE ===== */
+@media (max-width:768px),(hover:none) and (pointer:coarse){
+  #menu h1{font-size:2.2em;letter-spacing:3px}
+  #menu .subtitle{font-size:1em}
+  #menu .dev{font-size:0.65em;margin-bottom:20px}
+  .menu-btn{padding:12px 30px;font-size:1em;min-width:220px}
+  .menu-controls{font-size:0.7em;margin-top:20px;display:none}
+  #menu .menu-footer{font-size:0.55em}
+  #hud-mode{font-size:0.65em;top:12px;left:12px}
+  #hud-score-box{top:10px;right:12px}
+  #hud-score{font-size:1em}
+  #hud-highscore{font-size:0.6em}
+  #hud-time{font-size:0.6em}
+  #hud-next{font-size:0.55em}
+  #hud-subtitle{bottom:170px;font-size:0.75em}
+  #hud-controls{display:none}
+  #hud-fps{display:none}
+  #ach-panel{width:min(320px,85vw);padding:20px 16px}
+  #ach-popup{min-width:auto;width:85vw;max-width:320px;padding:12px 20px}
+  #ach-popup .ach-name{font-size:1.05em}
+  #pause-overlay h2{font-size:1.5em}
+  #pause-overlay .menu-btn{padding:10px 30px;font-size:0.95em;min-width:200px}
+}
 </style>
 </head>
 <body>
@@ -154,6 +201,22 @@ canvas{display:block}
 
 <!-- Vignette overlay -->
 <div id="vignette"></div>
+
+<!-- Mobile touch controls -->
+<div id="touch-controls">
+  <div id="joystick-zone">
+    <div id="joystick-base"></div>
+    <div id="joystick-knob"></div>
+  </div>
+  <div id="touch-action-zone">
+    <div class="touch-btn" id="touch-jump">Jump</div>
+    <div class="touch-btn" id="touch-wobble">Wob</div>
+  </div>
+</div>
+<div id="mobile-hud-btns">
+  <div class="mhud-btn" id="mob-pause">&#9208;</div>
+  <div class="mhud-btn" id="mob-ach">&#127942;</div>
+</div>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
 <script>
@@ -3050,35 +3113,150 @@ document.addEventListener('keydown', e => {
 });
 document.addEventListener('keyup', e => { keys[e.code] = false; });
 
-// Pointer lock
-renderer.domElement.addEventListener('click', () => {
-  if (isPlaying && !isPaused) {
-    renderer.domElement.requestPointerLock();
+// ===== MOBILE DETECTION =====
+const isMobile = ('ontouchstart' in window) || (navigator.maxTouchPoints > 0);
+if (isMobile) document.body.classList.add('touch-visible');
+
+// Pointer lock (desktop only)
+if (!isMobile) {
+  renderer.domElement.addEventListener('click', () => {
+    if (isPlaying && !isPaused) {
+      renderer.domElement.requestPointerLock();
+    }
+  });
+  document.addEventListener('mousemove', e => {
+    if (document.pointerLockElement === renderer.domElement && isPlaying && !isPaused) {
+      cameraYaw -= e.movementX * 0.003;
+      cameraPitch = Math.max(-0.5, Math.min(1.5, cameraPitch - e.movementY * 0.003));
+    }
+  });
+  document.addEventListener('pointerlockchange', () => {
+    if (document.pointerLockElement !== renderer.domElement && isPlaying && !isPaused) {
+      // Pointer lock lost
+    }
+  });
+}
+
+// ===== TOUCH CAMERA (right-side drag) =====
+let touchCamId = null;
+let touchCamLastX = 0, touchCamLastY = 0;
+
+renderer.domElement.addEventListener('touchstart', e => {
+  if (!isPlaying || isPaused) return;
+  for (const t of e.changedTouches) {
+    // Only treat touches on the right 60% of screen as camera
+    if (t.clientX > window.innerWidth * 0.4 && touchCamId === null) {
+      // Make sure it's not on the action buttons
+      const el = document.elementFromPoint(t.clientX, t.clientY);
+      if (el && (el.classList.contains('touch-btn') || el.classList.contains('mhud-btn'))) continue;
+      touchCamId = t.identifier;
+      touchCamLastX = t.clientX;
+      touchCamLastY = t.clientY;
+    }
   }
-});
-document.addEventListener('mousemove', e => {
-  if (document.pointerLockElement === renderer.domElement && isPlaying && !isPaused) {
-    cameraYaw -= e.movementX * 0.003;
-    cameraPitch = Math.max(-0.5, Math.min(1.5, cameraPitch - e.movementY * 0.003));
+}, { passive: true });
+
+renderer.domElement.addEventListener('touchmove', e => {
+  if (!isPlaying || isPaused || touchCamId === null) return;
+  for (const t of e.changedTouches) {
+    if (t.identifier === touchCamId) {
+      const dx = t.clientX - touchCamLastX;
+      const dy = t.clientY - touchCamLastY;
+      cameraYaw -= dx * 0.005;
+      cameraPitch = Math.max(-0.5, Math.min(1.5, cameraPitch - dy * 0.005));
+      touchCamLastX = t.clientX;
+      touchCamLastY = t.clientY;
+    }
   }
-});
-document.addEventListener('pointerlockchange', () => {
-  if (document.pointerLockElement !== renderer.domElement && isPlaying && !isPaused) {
-    // Pointer lock lost - don't pause, just let it be
+}, { passive: true });
+
+renderer.domElement.addEventListener('touchend', e => {
+  for (const t of e.changedTouches) {
+    if (t.identifier === touchCamId) touchCamId = null;
   }
-});
+}, { passive: true });
+
+// ===== VIRTUAL JOYSTICK =====
+let joyActive = false, joyId = null;
+let joyX = 0, joyY = 0;
+const joystickZone = document.getElementById('joystick-zone');
+const joystickKnob = document.getElementById('joystick-knob');
+const joyRadius = 45; // max displacement in px
+
+joystickZone.addEventListener('touchstart', e => {
+  e.stopPropagation();
+  const t = e.changedTouches[0];
+  joyId = t.identifier;
+  joyActive = true;
+  updateJoystick(t);
+}, { passive: true });
+
+joystickZone.addEventListener('touchmove', e => {
+  e.stopPropagation();
+  for (const t of e.changedTouches) {
+    if (t.identifier === joyId) updateJoystick(t);
+  }
+}, { passive: true });
+
+joystickZone.addEventListener('touchend', e => {
+  for (const t of e.changedTouches) {
+    if (t.identifier === joyId) {
+      joyActive = false; joyId = null; joyX = 0; joyY = 0;
+      joystickKnob.style.left = '45px';
+      joystickKnob.style.top = '45px';
+    }
+  }
+}, { passive: true });
+
+joystickZone.addEventListener('touchcancel', e => {
+  joyActive = false; joyId = null; joyX = 0; joyY = 0;
+  joystickKnob.style.left = '45px';
+  joystickKnob.style.top = '45px';
+}, { passive: true });
+
+function updateJoystick(touch) {
+  const rect = joystickZone.getBoundingClientRect();
+  const cx = rect.left + rect.width / 2;
+  const cy = rect.top + rect.height / 2;
+  let dx = touch.clientX - cx;
+  let dy = touch.clientY - cy;
+  const dist = Math.sqrt(dx * dx + dy * dy);
+  if (dist > joyRadius) { dx = dx / dist * joyRadius; dy = dy / dist * joyRadius; }
+  joyX = dx / joyRadius;  // -1 to 1
+  joyY = dy / joyRadius;  // -1 to 1
+  joystickKnob.style.left = (45 + dx) + 'px';
+  joystickKnob.style.top = (45 + dy) + 'px';
+}
+
+// ===== TOUCH ACTION BUTTONS =====
+let touchJumping = false, touchWobbling = false;
+const touchJumpBtn = document.getElementById('touch-jump');
+const touchWobbleBtn = document.getElementById('touch-wobble');
+
+touchJumpBtn.addEventListener('touchstart', e => { e.stopPropagation(); touchJumping = true; }, { passive: true });
+touchJumpBtn.addEventListener('touchend', e => { touchJumping = false; }, { passive: true });
+touchJumpBtn.addEventListener('touchcancel', e => { touchJumping = false; }, { passive: true });
+touchWobbleBtn.addEventListener('touchstart', e => { e.stopPropagation(); touchWobbling = true; }, { passive: true });
+touchWobbleBtn.addEventListener('touchend', e => { touchWobbling = false; }, { passive: true });
+touchWobbleBtn.addEventListener('touchcancel', e => { touchWobbling = false; }, { passive: true });
+
+// Mobile HUD buttons
+document.getElementById('mob-pause').addEventListener('click', () => { if (isPlaying) togglePause(); });
+document.getElementById('mob-ach').addEventListener('click', () => { toggleAchPanel(); });
 
 // ===== PHYSICS =====
 function updatePhysics(dt) {
   const cfg = MODES[gameMode];
   const dt60 = dt * 60; // normalize to 60fps
 
-  // Input with smoothing
+  // Input with smoothing — merge keyboard + virtual joystick
   let rawX = 0, rawZ = 0;
   if (keys['KeyW'] || keys['ArrowUp']) rawZ -= 1;
   if (keys['KeyS'] || keys['ArrowDown']) rawZ += 1;
   if (keys['KeyA'] || keys['ArrowLeft']) rawX -= 1;
   if (keys['KeyD'] || keys['ArrowRight']) rawX += 1;
+  // Virtual joystick input
+  if (joyActive) { rawX += joyX; rawZ += joyY; }
   const rawLen = Math.sqrt(rawX * rawX + rawZ * rawZ);
   if (rawLen > 0) { rawX /= rawLen; rawZ /= rawLen; }
   // Lerp towards target input
@@ -3096,7 +3274,7 @@ function updatePhysics(dt) {
   }
 
   // Jump / Wobble
-  if (keys['Space']) {
+  if (keys['Space'] || (isMobile && touchJumping)) {
     if (cfg.canJump && coconut.onGround) {
       coconut.vel.y = cfg.jumpForce;
       coconut.onGround = false;
@@ -3104,6 +3282,11 @@ function updatePhysics(dt) {
       coconut.angVel.x += (Math.random()-0.5) * cfg.wobbleAmt * dt60;
       coconut.angVel.z += (Math.random()-0.5) * cfg.wobbleAmt * dt60;
     }
+  }
+  // Touch wobble button (separate from jump)
+  if (isMobile && touchWobbling) {
+    coconut.angVel.x += (Math.random()-0.5) * cfg.wobbleAmt * dt60;
+    coconut.angVel.z += (Math.random()-0.5) * cfg.wobbleAmt * dt60;
   }
 
   // Gravity
